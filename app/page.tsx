@@ -1,12 +1,15 @@
 'use client';
+import { useRouter } from 'next/navigation';
 
 import { useTelegram } from './providers/TelegramProvider';
 
 export default function Home() {
   const { user, haptic, colorScheme, isLoading, error } = useTelegram();
+  const router = useRouter(); // <-- Добавили роутер
 
   const handleStart = () => {
     haptic?.impactOccurred('medium');
+    router.push('/create'); // <-- Переходим на страницу создания
   };
 
   // Пока ждем ответа от бэкенда — показываем скелетон/загрузку
