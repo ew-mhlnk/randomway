@@ -23,8 +23,7 @@ dp = Dispatcher()
 
 @dp.message(CommandStart())
 async def start(message: Message):
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🎲 Открыть RandomWay", web_app=WebAppInfo(url=MINI_APP_URL))]
-    ])
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🎲 Открыть RandomWay", web_app=WebAppInfo(url=MINI_APP_URL))]])
     await message.answer(
         "👋 Привет! Я <b>RandomWay</b> — бот для честных розыгрышей.\n\n"
         "🎯 Организуй розыгрыш за пару минут\n"
@@ -58,6 +57,16 @@ app.add_middleware(
 # Подключаем роутер с нашими путями из api.py
 from api import router as api_router
 app.include_router(api_router)
+
+# --- ДОБАВЛЕННЫЙ БЛОК ---
+@app.get("/")
+async def root():
+    return {
+        "status": "ok", 
+        "project": "RandomWay API",
+        "message": "Бэкенд успешно работает и защищен! 🚀"
+    }
+# ------------------------
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
