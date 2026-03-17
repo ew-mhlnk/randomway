@@ -1,38 +1,65 @@
 @import "tailwindcss";
 
 :root {
-  --tg-theme-bg-color: #ffffff;
-  --tg-theme-text-color: #000000;
-  --tg-theme-hint-color: #999999;
-  --tg-theme-link-color: #2481cc;
-  --tg-theme-button-color: #2481cc;
-  --tg-theme-button-text-color: #ffffff;
-  --tg-theme-secondary-bg-color: #f1f1f1;
+  /* Базовые цвета берем у Телеграма, если их нет - фоллбэк на светлую тему */
+  --bg-primary: var(--tg-theme-bg-color, #F4F4F5);
+  --text-primary: var(--tg-theme-text-color, #000000);
+  --text-secondary: var(--tg-theme-hint-color, rgba(0, 0, 0, 0.55));
+  --text-muted: rgba(0, 0, 0, 0.30);
+  
+  /* Светлое стекло (Light Mode) */
+  --bg-card: rgba(0, 0, 0, 0.04);
+  --bg-card-hover: rgba(0, 0, 0, 0.08);
+  --border-glass: rgba(0, 0, 0, 0.05);
+
+  /* Акценты из ТЗ */
+  --accent-gradient: linear-gradient(135deg, #6C63FF, #FF6CAB);
+  --accent-blue: #4A9EFF;
+  --success: #2ECC71;
+  --danger: #E74C3C;
+}
+
+/* Тёмная тема (Dark Mode) */
+.dark {
+  --bg-primary: var(--tg-theme-bg-color, #0F0F1A);
+  --text-primary: var(--tg-theme-text-color, #FFFFFF);
+  --text-secondary: var(--tg-theme-hint-color, rgba(255, 255, 255, 0.55));
+  --text-muted: rgba(255, 255, 255, 0.30);
+  
+  /* Тёмное стекло (Dark Mode) */
+  --bg-card: rgba(255, 255, 255, 0.05);
+  --bg-card-hover: rgba(255, 255, 255, 0.08);
+  --border-glass: rgba(255, 255, 255, 0.08);
 }
 
 body {
-  background-color: var(--tg-theme-bg-color);
-  color: var(--tg-theme-text-color);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  margin: 0;
-  padding: 0;
-  min-height: 100vh;
-}
-
-.tg-bg { background-color: var(--tg-theme-bg-color); }
-.tg-bg-secondary { background-color: var(--tg-theme-secondary-bg-color); }
-.tg-text { color: var(--tg-theme-text-color); }
-.tg-hint { color: var(--tg-theme-hint-color); }
-.tg-link { color: var(--tg-theme-link-color); }
-.tg-button {
-  background-color: var(--tg-theme-button-color);
-  color: var(--tg-theme-button-text-color);
-}
-.tg-button:active {
-  opacity: 0.8;
-}
-
-* {
-  box-sizing: border-box;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   -webkit-tap-highlight-color: transparent;
+}
+
+/* Утилиты для Glassmorphism */
+.glass-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-glass);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.glass-card:active {
+  background: var(--bg-card-hover);
+  transform: scale(0.97); /* Та самая spring-анимация из ТЗ */
+}
+
+.gradient-btn {
+  background: var(--accent-gradient);
+  color: #ffffff;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.gradient-btn:active {
+  transform: scale(0.97);
+  opacity: 0.9;
 }

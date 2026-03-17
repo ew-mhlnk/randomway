@@ -13,8 +13,10 @@ declare global {
     Telegram?: {
       WebApp: {
         ready: () => void;
+        expand: () => void;
+        requestFullscreen?: () => void; // Добавили опциональный метод
         colorScheme: 'light' | 'dark';
-        initData: string; // <-- Вот она, зашифрованная строка!
+        initData: string;
         HapticFeedback: TelegramHaptic;
       };
     };
@@ -24,7 +26,7 @@ declare global {
 interface TelegramState {
   isReady: boolean;
   colorScheme: 'light' | 'dark';
-  user?: any; // Здесь будут лежать проверенные данные с бэкенда
+  user?: any;
   haptic: TelegramHaptic | null;
   isLoading: boolean;
   error: string | null;
@@ -41,13 +43,31 @@ const defaultState: TelegramState = {
 const TelegramContext = createContext<TelegramState>(defaultState);
 
 export function TelegramProvider({ children }: { children: React.ReactNode }) {
-  const[state, setState] = useState<TelegramState>(defaultState);
+  const [state, setState] = useState<TelegramState>(defaultState);
 
   useEffect(() => {
     const tg = window.Telegram?.WebApp;
-    
+
     if (tg) {
       tg.ready();
+
+      // --- НОВОЕ: Переключение темы для Tailwind и CSS-переменных ---
+      if (tg.colorScheme === 'dark') {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+
+      // --- НОВОЕ: Пытаемся сделать Fullscreen (как в твоем примере) ---
+      try {
+        if (tg.requestFullscreen) {
+          tg.requestFullscreen();
+        } else {
+          tg.expand();
+        }
+      } catch (e) {
+        console.warn('Fullscreen/Expand failed:', e);
+      }
 
       // Шаг 1: Задаем базовые настройки темы
       setState((s) => ({
@@ -76,10 +96,9 @@ export function TelegramProvider({ children }: { children: React.ReactNode }) {
           }
 
           const data = await response.json();
-          
+
           // Сохраняем проверенного юзера в стейт
           setState((s) => ({ ...s, isLoading: false, user: data.user }));
-          
         } catch (err: any) {
           setState((s) => ({ ...s, isLoading: false, error: err.message }));
         }
@@ -89,7 +108,7 @@ export function TelegramProvider({ children }: { children: React.ReactNode }) {
     } else {
       setState((s) => ({ ...s, isLoading: false, error: 'Telegram WebApp не найден' }));
     }
-  },[]);
+  }, []);
 
   return (
     <TelegramContext.Provider value={state}>
