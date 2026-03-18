@@ -70,3 +70,30 @@ async def authenticate_user(request: AuthRequest, db: AsyncSession = Depends(get
     await db.commit()
     
     return {"status": "success", "user": user_data}
+
+# --- ДОБАВЛЕНИЯ ДЛЯ СОЗДАНИЯ РОЗЫГРЫША ---
+from services.giveaway_service import giveaway_service
+
+# Модель того, что мы ждем от React (Zustand)
+class GiveawayCreateRequest(BaseModel):
+    initData: str
+    title: str
+    type: str
+    template_id: str
+    winners_count: int
+    # Позже добавим сюда каналы, даты и бонусы
+
+@router.post("/giveaways")
+async def create_giveaway(request: GiveawayCreateRequest, db: AsyncSession = Depends(get_db)):
+    # 1. Проверяем криптографию и получаем ID юзера
+    user_id = await get_current_user_id(request.initData)
+    
+    # 2. Превращаем Pydantic модель в обычный словарь
+    data = request.model_dump()
+    
+    # 3. Передаем в наш ООП Сервис
+    try:
+        new_giveaway = await giveaway_service.create_draft(db, user_id, data)
+        return {"status": "success", "message": "Розыгрыш успешно создан!", "giveaway_id": new_giveaway.id}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
