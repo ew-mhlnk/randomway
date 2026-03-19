@@ -20,6 +20,15 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 class AuthRequest(BaseModel):
     initData: str
 
+class GiveawayCreate(BaseModel):
+    initData: str
+    title: str
+    type: str
+    template_id: int
+    winners_count: int = 1
+    start_date: str | None = None
+    end_date: str | None = None
+
 def validate_telegram_data(init_data: str) -> dict | None:
     """Криптографическая проверка подписи Телеграма"""
     parsed_data = dict(urllib.parse.parse_qsl(init_data))
@@ -35,6 +44,24 @@ def validate_telegram_data(init_data: str) -> dict | None:
     if calculated_hash == hash_val:
         return json.loads(parsed_data.get("user", "{}"))
     return None
+# Импортируем наш новый сервис бизнес-логики
+from services.giveaway_service import giveaway_service
+
+# Функция-помощник для расшифровки ID юзера из initData
+async def get_current_user_id(initData: str) -> int:
+    user_data = validate_telegram_data(initData)
+    if not user_data:
+        raise HTTPException(status_code=401, detail="Не авторизован")
+    return user_data.get("id")
+
+@router.post("/giveaways")
+async def create_giveaway(request: GiveawayCreate, db: AsyncSession = Depends(get_db)):
+    user_id = await get_current_user_id(request.initData)
+    
+    # request.model_dump() превращает данные от фронта в обычный Python-словарь
+    new_giveaway = await giveaway_service.create_draft(db, user_id, request.model_dump())
+    
+    return {"status": "success", "id": new_giveaway.id}
 
 @router.post("/auth")
 async def authenticate_user(request: AuthRequest, db: AsyncSession = Depends(get_db)):

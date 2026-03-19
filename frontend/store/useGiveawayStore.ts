@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 
 interface GiveawayState {
-  // Данные розыгрыша
   type: 'standard' | 'boosts' | 'invites' | 'custom' | null;
   title: string;
   templateId: string;
@@ -9,12 +8,12 @@ interface GiveawayState {
   buttonColor: string;
   winnersCount: number;
   
-  // Методы для изменения этих данных
   setType: (type: 'standard' | 'boosts' | 'invites' | 'custom') => void;
   setTitle: (title: string) => void;
   setTemplateId: (id: string) => void;
   setButtonData: (text: string, color: string) => void;
   setWinnersCount: (count: number) => void;
+  clearDraft: () => void;
 }
 
 export const useGiveawayStore = create<GiveawayState>((set) => ({
@@ -27,7 +26,8 @@ export const useGiveawayStore = create<GiveawayState>((set) => ({
 
   setType: (type) => set({ type }),
   setTitle: (title) => set({ title }),
-setTemplateId: (id) => set({ templateId: id }),
+  setTemplateId: (id) => set({ templateId: id }),
   setButtonData: (text, color) => set({ buttonText: text, buttonColor: color }),
   setWinnersCount: (count) => set({ winnersCount: count }),
+  clearDraft: () => set({ type: null, title: '', templateId: '' })
 }));

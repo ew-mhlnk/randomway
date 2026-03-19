@@ -14,10 +14,16 @@ declare global {
       WebApp: {
         ready: () => void;
         expand: () => void;
-        requestFullscreen?: () => void; // Добавили опциональный метод
         colorScheme: 'light' | 'dark';
         initData: string;
         HapticFeedback: TelegramHaptic;
+        BackButton: {
+          show: () => void;
+          hide: () => void;
+          onClick: (cb: () => void) => void;
+          offClick: (cb: () => void) => void;
+        };
+        openTelegramLink: (url: string) => void;
       };
     };
   }
@@ -46,69 +52,60 @@ export function TelegramProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<TelegramState>(defaultState);
 
   useEffect(() => {
-    const tg = window.Telegram?.WebApp;
+    let retries = 0;
 
-    if (tg) {
-      tg.ready();
-
-      // --- НОВОЕ: Переключение темы для Tailwind и CSS-переменных ---
-      if (tg.colorScheme === 'dark') {
-        document.documentElement.classList.add('dark');
-      } else {
-        document.documentElement.classList.remove('dark');
-      }
-
-      // --- НОВОЕ: Пытаемся сделать Fullscreen (как в твоем примере) ---
+    const authenticateUser = async (initData: string) => {
       try {
-        if (tg.requestFullscreen) {
-          tg.requestFullscreen();
-        } else {
-          tg.expand();
-        }
-      } catch (e) {
-        console.warn('Fullscreen/Expand failed:', e);
+        const response = await fetch('https://api.randomway.pro/auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ initData }),
+        });
+
+        if (!response.ok) throw new Error('Ошибка криптографической проверки');
+        const data = await response.json();
+        
+        setState((s) => ({ ...s, isLoading: false, user: data.user }));
+      } catch (err: any) {
+        setState((s) => ({ ...s, isLoading: false, error: err.message }));
       }
+    };
 
-      // Шаг 1: Задаем базовые настройки темы
-      setState((s) => ({
-        ...s,
-        isReady: true,
-        colorScheme: tg.colorScheme ?? 'dark',
-        haptic: tg.HapticFeedback ?? null,
-      }));
+    const checkTelegram = () => {
+      const tg = window.Telegram?.WebApp;
+      if (tg && tg.initData) {
+        tg.ready();
 
-      // Шаг 2: Отправляем данные на наш безопасный бэкенд
-      const authenticateUser = async () => {
-        try {
-          const initData = tg.initData;
-          if (!initData) {
-            throw new Error('Пожалуйста, откройте приложение через Telegram');
-          }
-
-          const response = await fetch('https://api.randomway.pro/auth', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ initData }),
-          });
-
-          if (!response.ok) {
-            throw new Error('Ошибка криптографической проверки');
-          }
-
-          const data = await response.json();
-
-          // Сохраняем проверенного юзера в стейт
-          setState((s) => ({ ...s, isLoading: false, user: data.user }));
-        } catch (err: any) {
-          setState((s) => ({ ...s, isLoading: false, error: err.message }));
+        if (tg.colorScheme === 'dark') {
+          document.documentElement.classList.add('dark');
+        } else {
+          document.documentElement.classList.remove('dark');
         }
-      };
 
-      authenticateUser();
-    } else {
-      setState((s) => ({ ...s, isLoading: false, error: 'Telegram WebApp не найден' }));
-    }
-  }, []);
+        try {
+          if (tg.expand) {
+            tg.expand();
+          }
+        } catch (e) {}
+
+        setState((s) => ({
+          ...s,
+          isReady: true,
+          colorScheme: tg.colorScheme ?? 'dark',
+          haptic: tg.HapticFeedback ?? null,
+        }));
+        
+        authenticateUser(tg.initData);
+      } else if (retries < 10) {
+        retries++;
+        setTimeout(checkTelegram, 50);
+      } else {
+        setState((s) => ({ ...s, isLoading: false, error: 'Пожалуйста, откройте приложение через Telegram' }));
+      }
+    };
+
+    checkTelegram();
+  }, []); // ← вот здесь не хватало [], );
 
   return (
     <TelegramContext.Provider value={state}>
