@@ -5,6 +5,7 @@ import { useTelegram } from '../providers/TelegramProvider';
 import NativeBackButton from '../../components/NativeBackButton';
 
 const API = 'https://api.randomway.pro';
+const BOT = process.env.NEXT_PUBLIC_BOT_USERNAME!;
 
 interface Template {
   id: number;
@@ -18,33 +19,19 @@ export default function TemplatesPage() {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<number | null>(null);
-  const [botUsername, setBotUsername] = useState('');
 
   useEffect(() => {
     if (!initData) return;
-    const enc = encodeURIComponent(initData);
-
-    Promise.all([
-      fetch(`${API}/templates?initData=${enc}`).then(r => r.json()),
-      fetch(`${API}/bot-info?initData=${enc}`).then(r => r.json()),
-    ])
-      .then(([tmpl, info]) => {
-        setTemplates(tmpl.templates ?? []);
-        setBotUsername(info.username ?? '');
-      })
+    fetch(`${API}/templates?initData=${encodeURIComponent(initData)}`)
+      .then(r => r.json())
+      .then(d => setTemplates(d.templates ?? []))
       .catch(console.error)
       .finally(() => setIsLoading(false));
   }, [initData]);
 
   const handleAdd = () => {
     haptic?.impactOccurred('medium');
-    // openTelegramLink → диалог "приложение закроется" → OK → бот
-    // бот получает /start add_post и просит прислать текст поста
-    if (botUsername) {
-      window.Telegram?.WebApp?.openTelegramLink(
-        `https://t.me/${botUsername}?start=add_post`
-      );
-    }
+    window.Telegram!.WebApp.openTelegramLink(`https://t.me/${BOT}?start=add_post`);
   };
 
   const handleDelete = async (id: number) => {
@@ -54,11 +41,8 @@ export default function TemplatesPage() {
     try {
       await fetch(`${API}/templates/${id}?initData=${encodeURIComponent(initData)}`, { method: 'DELETE' });
       setTemplates(prev => prev.filter(t => t.id !== id));
-    } catch {
-      alert('Не удалось удалить');
-    } finally {
-      setDeletingId(null);
-    }
+    } catch { alert('Не удалось удалить'); }
+    finally { setDeletingId(null); }
   };
 
   const icon = (t: string | null) => ({ photo: '🖼', video: '🎥', animation: '🎞' }[t ?? ''] ?? '📝');
@@ -66,9 +50,7 @@ export default function TemplatesPage() {
   return (
     <main className="min-h-screen p-4 pt-6 flex flex-col">
       <NativeBackButton />
-      <h1 className="text-2xl font-medium text-center mb-6" style={{ color: 'var(--text-primary)' }}>
-        Шаблоны постов
-      </h1>
+      <h1 className="text-2xl font-medium text-center mb-6" style={{ color: 'var(--text-primary)' }}>Шаблоны постов</h1>
 
       {isLoading ? (
         <p className="text-center mt-10" style={{ color: 'var(--text-secondary)' }}>Загрузка...</p>
@@ -92,9 +74,7 @@ export default function TemplatesPage() {
                 <span className="text-2xl shrink-0">{icon(t.media_type)}</span>
                 <div className="flex-1 min-w-0">
                   <p className="text-[14px] leading-5"
-                     style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>
-                    {t.preview}
-                  </p>
+                     style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>{t.preview}</p>
                   <p className="text-[12px] mt-1" style={{ color: 'var(--text-secondary)' }}>
                     Кнопка: «{t.button_text}»
                   </p>
@@ -113,9 +93,7 @@ export default function TemplatesPage() {
       {templates.length > 0 && (
         <button onClick={handleAdd}
                 className="fixed bottom-10 left-1/2 -translate-x-1/2 w-14 h-14 rounded-full flex items-center justify-center text-white text-3xl shadow-lg active:scale-95 transition-transform"
-                style={{ background: 'var(--accent-blue)' }}>
-          +
-        </button>
+                style={{ background: 'var(--accent-blue)' }}>+</button>
       )}
     </main>
   );

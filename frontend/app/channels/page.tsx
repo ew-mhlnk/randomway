@@ -5,6 +5,7 @@ import { useTelegram } from '../providers/TelegramProvider';
 import NativeBackButton from '../../components/NativeBackButton';
 
 const API = 'https://api.randomway.pro';
+const BOT = process.env.NEXT_PUBLIC_BOT_USERNAME!;
 
 interface Channel {
   id: number;
@@ -17,8 +18,6 @@ interface Channel {
 function Avatar({ channel, initData }: { channel: Channel; initData: string }) {
   const [err, setErr] = useState(false);
   const colors = ['#1A8CFF', '#E020C0', '#2ECC71', '#E74C3C', '#F39C12'];
-  const color = colors[channel.id % colors.length];
-
   if (channel.has_photo && !err) {
     return (
       <img
@@ -30,10 +29,8 @@ function Avatar({ channel, initData }: { channel: Channel; initData: string }) {
     );
   }
   return (
-    <div
-      className="w-11 h-11 rounded-full flex items-center justify-center text-white font-bold text-lg shrink-0"
-      style={{ background: color }}
-    >
+    <div className="w-11 h-11 rounded-full flex items-center justify-center text-white font-bold text-lg shrink-0"
+         style={{ background: colors[channel.id % colors.length] }}>
       {channel.title[0].toUpperCase()}
     </div>
   );
@@ -44,33 +41,19 @@ export default function ChannelsPage() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<number | null>(null);
-  const [botUsername, setBotUsername] = useState('');
 
   useEffect(() => {
     if (!initData) return;
-    const enc = encodeURIComponent(initData);
-
-    Promise.all([
-      fetch(`${API}/channels?initData=${enc}`).then(r => r.json()),
-      fetch(`${API}/bot-info?initData=${enc}`).then(r => r.json()),
-    ])
-      .then(([ch, info]) => {
-        setChannels(ch.channels ?? []);
-        setBotUsername(info.username ?? '');
-      })
+    fetch(`${API}/channels?initData=${encodeURIComponent(initData)}`)
+      .then(r => r.json())
+      .then(d => setChannels(d.channels ?? []))
       .catch(console.error)
       .finally(() => setIsLoading(false));
   }, [initData]);
 
   const handleAdd = () => {
     haptic?.impactOccurred('medium');
-    // openTelegramLink → показывает диалог "приложение закроется" → OK → бот
-    // бот получает /start add_channel и показывает меню с кнопками
-    if (botUsername) {
-      window.Telegram?.WebApp?.openTelegramLink(
-        `https://t.me/${botUsername}?start=add_channel`
-      );
-    }
+    window.Telegram!.WebApp.openTelegramLink(`https://t.me/${BOT}?start=add_channel`);
   };
 
   const handleDelete = async (id: number) => {
@@ -80,19 +63,14 @@ export default function ChannelsPage() {
     try {
       await fetch(`${API}/channels/${id}?initData=${encodeURIComponent(initData)}`, { method: 'DELETE' });
       setChannels(prev => prev.filter(c => c.id !== id));
-    } catch {
-      alert('Не удалось удалить');
-    } finally {
-      setDeletingId(null);
-    }
+    } catch { alert('Не удалось удалить'); }
+    finally { setDeletingId(null); }
   };
 
   return (
     <main className="min-h-screen p-4 pt-6 flex flex-col">
       <NativeBackButton />
-      <h1 className="text-2xl font-medium text-center mb-6" style={{ color: 'var(--text-primary)' }}>
-        Каналы
-      </h1>
+      <h1 className="text-2xl font-medium text-center mb-6" style={{ color: 'var(--text-primary)' }}>Каналы</h1>
 
       {isLoading ? (
         <p className="text-center mt-10" style={{ color: 'var(--text-secondary)' }}>Загрузка...</p>
@@ -101,7 +79,7 @@ export default function ChannelsPage() {
           <span className="text-5xl">🏛</span>
           <p style={{ color: 'var(--text-secondary)' }}>Каналов пока нет</p>
           <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-            Нажмите кнопку — откроется бот где можно выбрать канал или группу
+            Нажмите кнопку — откроется бот, там выберете канал или группу
           </p>
           <button onClick={handleAdd} className="px-6 py-3 rounded-xl text-white font-medium"
                   style={{ background: 'var(--accent-blue)' }}>
@@ -134,9 +112,7 @@ export default function ChannelsPage() {
       {channels.length > 0 && (
         <button onClick={handleAdd}
                 className="fixed bottom-10 left-1/2 -translate-x-1/2 w-14 h-14 rounded-full flex items-center justify-center text-white text-3xl shadow-lg active:scale-95 transition-transform"
-                style={{ background: 'var(--accent-blue)' }}>
-          +
-        </button>
+                style={{ background: 'var(--accent-blue)' }}>+</button>
       )}
     </main>
   );
