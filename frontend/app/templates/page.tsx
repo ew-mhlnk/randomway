@@ -11,7 +11,6 @@ interface Template {
   preview: string;
   media_type: string | null;
   button_text: string;
-  button_color: string;
 }
 
 export default function TemplatesPage() {
@@ -19,7 +18,7 @@ export default function TemplatesPage() {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<number | null>(null);
-  const [addLink, setAddLink] = useState('');
+  const [botUsername, setBotUsername] = useState('');
 
   useEffect(() => {
     if (!initData) return;
@@ -28,26 +27,23 @@ export default function TemplatesPage() {
     Promise.all([
       fetch(`${API}/templates?initData=${enc}`).then(r => r.json()),
       fetch(`${API}/channels/add-link?initData=${enc}`).then(r => r.json()),
-    ])
-      .then(([tmpl, lnk]) => {
-        setTemplates(tmpl.templates ?? []);
-        // Строим ссылку для создания поста — start=add_post
-        if (lnk.link) {
-          // lnk.link = https://t.me/BOTNAME?startchannel=...
-          // Нам нужно: https://t.me/BOTNAME?start=add_post
-          const botUsername = lnk.link.split('t.me/')[1]?.split('?')[0];
-          if (botUsername) setAddLink(`https://t.me/${botUsername}?start=add_post`);
-        }
-      })
-      .catch(console.error)
+    ]).then(([tmpl, lnk]) => {
+      setTemplates(tmpl.templates ?? []);
+      // Извлекаем username бота из ссылки
+      const u = lnk.bot_username ?? '';
+      setBotUsername(u);
+    }).catch(console.error)
       .finally(() => setIsLoading(false));
   }, [initData]);
 
   const handleAdd = () => {
     haptic?.impactOccurred('medium');
-    if (addLink) {
-      window.Telegram?.WebApp?.openTelegramLink(addLink);
-    }
+    if (!botUsername) return;
+    // /newpost работает и на десктопе и на мобильном
+    // openTelegramLink открывает бота, пользователь видит инструкцию
+    window.Telegram?.WebApp?.openTelegramLink(
+      `https://t.me/${botUsername}?start=add_post`
+    );
   };
 
   const handleDelete = async (id: number) => {
@@ -55,29 +51,24 @@ export default function TemplatesPage() {
     haptic?.impactOccurred('medium');
     setDeletingId(id);
     try {
-      const res = await fetch(
-        `${API}/templates/${id}?initData=${encodeURIComponent(initData)}`,
-        { method: 'DELETE' }
-      );
-      if (!res.ok) throw new Error();
+      await fetch(`${API}/templates/${id}?initData=${encodeURIComponent(initData)}`, {
+        method: 'DELETE',
+      });
       setTemplates(prev => prev.filter(t => t.id !== id));
     } catch {
-      alert('Не удалось удалить шаблон');
+      alert('Не удалось удалить');
     } finally {
       setDeletingId(null);
     }
   };
 
-  const mediaIcon = (type: string | null) => {
-    if (type === 'photo') return '🖼';
-    if (type === 'video') return '🎥';
-    return '📝';
-  };
+  const mediaIcon = (type: string | null) => (
+    { photo: '🖼', video: '🎥', animation: '🎞' }[type ?? ''] ?? '📝'
+  );
 
   return (
     <main className="min-h-screen p-4 pt-6 flex flex-col">
       <NativeBackButton />
-
       <h1 className="text-2xl font-medium text-center mb-6" style={{ color: 'var(--text-primary)' }}>
         Шаблоны постов
       </h1>
@@ -85,12 +76,12 @@ export default function TemplatesPage() {
       {isLoading ? (
         <p className="text-center mt-10" style={{ color: 'var(--text-secondary)' }}>Загрузка...</p>
       ) : templates.length === 0 ? (
-        <div className="flex flex-col items-center gap-4 mt-10">
+        <div className="flex flex-col items-center gap-4 mt-10 text-center">
           <span className="text-5xl">📝</span>
           <p style={{ color: 'var(--text-secondary)' }}>Шаблонов пока нет</p>
-          <p className="text-sm text-center" style={{ color: 'var(--text-secondary)' }}>
+          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
             Шаблон — это текст поста о розыгрыше.<br />
-            Создаётся через бота — можно с фото или видео.
+            Создаётся через бота, поддерживает фото, видео, GIF.
           </p>
           <button
             onClick={handleAdd}
@@ -104,20 +95,17 @@ export default function TemplatesPage() {
         <div className="flex flex-col gap-3 pb-24">
           {templates.map(t => (
             <div key={t.id} className="glass-card p-4 rounded-xl">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-start gap-3 flex-1 min-w-0">
-                  <span className="text-2xl shrink-0">{mediaIcon(t.media_type)}</span>
-                  <div className="flex-1 min-w-0">
-                    <p
-                      className="text-[14px] leading-5"
-                      style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}
-                    >
-                      {t.preview}
-                    </p>
-                    <p className="text-[12px] mt-1" style={{ color: 'var(--text-secondary)' }}>
-                      Кнопка: «{t.button_text}»
-                    </p>
-                  </div>
+              <div className="flex items-start gap-3">
+                <span className="text-2xl shrink-0">{mediaIcon(t.media_type)}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[14px] leading-5" style={{
+                    color: 'var(--text-primary)', wordBreak: 'break-word'
+                  }}>
+                    {t.preview}
+                  </p>
+                  <p className="text-[12px] mt-1" style={{ color: 'var(--text-secondary)' }}>
+                    Кнопка: «{t.button_text}»
+                  </p>
                 </div>
                 <button
                   onClick={() => handleDelete(t.id)}
