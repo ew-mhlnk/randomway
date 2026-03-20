@@ -3,79 +3,137 @@
 import { useEffect, useState } from 'react';
 import { useTelegram } from '../providers/TelegramProvider';
 import NativeBackButton from '../../components/NativeBackButton';
-import { motion } from 'framer-motion';
+
+const API = 'https://api.randomway.pro';
+
+interface Template {
+  id: number;
+  preview: string;
+  media_type: string | null;
+  button_text: string;
+  button_color: string;
+}
 
 export default function TemplatesPage() {
-  const { haptic } = useTelegram();
-  const[templates, setTemplates] = useState<any[]>([]);
+  const { initData, haptic } = useTelegram();
+  const [templates, setTemplates] = useState<Template[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   useEffect(() => {
-    const fetchTemplates = async () => {
-      const tg = window.Telegram?.WebApp;
-      if (!tg?.initData) return;
-      try {
-        const res = await fetch(`https://api.randomway.pro/templates?initData=${encodeURIComponent(tg.initData)}`);
-        const data = await res.json();
-        setTemplates(data.templates ||[]);
-      } catch (e) {
-        console.error(e);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    fetchTemplates();
-  },[]);
+    if (!initData) return;
 
-  const handleAddTemplate = () => {
+    fetch(`${API}/templates?initData=${encodeURIComponent(initData)}`)
+      .then(r => r.json())
+      .then(data => setTemplates(data.templates || []))
+      .catch(console.error)
+      .finally(() => setIsLoading(false));
+  }, [initData]);
+
+  // Перебрасываем в бота для создания шаблона
+  const handleAdd = () => {
     haptic?.impactOccurred('medium');
-    const tg = window.Telegram?.WebApp;
-    // Перекидываем в бота для создания поста
-    tg?.openTelegramLink('https://t.me/ТВОЙ_БОТ?start=add_post');
+    const botUsername = process.env.NEXT_PUBLIC_BOT_USERNAME;
+    window.Telegram?.WebApp?.openTelegramLink(
+      `https://t.me/${botUsername}?start=add_post`
+    );
+  };
+
+  const handleDelete = async (id: number) => {
+    if (!confirm('Удалить шаблон?')) return;
+    haptic?.impactOccurred('medium');
+    setDeletingId(id);
+
+    try {
+      const res = await fetch(
+        `${API}/templates/${id}?initData=${encodeURIComponent(initData)}`,
+        { method: 'DELETE' }
+      );
+      if (!res.ok) throw new Error();
+      setTemplates(prev => prev.filter(t => t.id !== id));
+    } catch {
+      alert('Не удалось удалить шаблон');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const mediaIcon = (type: string | null) => {
+    if (type === 'photo') return '🖼';
+    if (type === 'video') return '🎥';
+    return '📝';
   };
 
   return (
-    <motion.main 
-      initial={{ opacity: 0, x: 20 }}
-      animate={{ opacity: 1, x: 0 }}
-      className="min-h-screen p-4 pt-6 flex flex-col items-center"
-    >
+    <main className="min-h-screen p-4 pt-6 flex flex-col">
       <NativeBackButton />
 
-      <h1 className="text-2xl font-medium text-(--text-primary) mb-6">Посты</h1>
+      <h1 className="text-2xl font-medium text-center mb-6" style={{ color: 'var(--text-primary)' }}>
+        Шаблоны постов
+      </h1>
 
       {isLoading ? (
-        <div className="animate-pulse text-(--text-secondary) mt-10">Загрузка...</div>
+        <p className="text-center mt-10" style={{ color: 'var(--text-secondary)' }}>Загрузка...</p>
       ) : templates.length === 0 ? (
-        <div className="text-(--text-secondary) mt-10 text-center">
-          <span className="text-4xl mb-2 block">📝</span>
-          У вас пока нет шаблонов постов
+        <div className="flex flex-col items-center gap-4 mt-10">
+          <span className="text-5xl">📝</span>
+          <p style={{ color: 'var(--text-secondary)' }}>Шаблонов пока нет</p>
+          <p className="text-sm text-center" style={{ color: 'var(--text-secondary)' }}>
+            Шаблон — это текст и картинка поста о розыгрыше.<br />
+            Создаётся через бота.
+          </p>
+          <button
+            onClick={handleAdd}
+            className="px-6 py-3 rounded-xl text-white font-medium"
+            style={{ background: 'var(--accent-blue)' }}
+          >
+            Создать шаблон
+          </button>
         </div>
       ) : (
-        <div className="w-full flex flex-col gap-3">
-          {templates.map((tpl) => (
-            <div key={tpl.id} className="glass-card p-4 rounded-xl flex items-center justify-between">
-              <div className="flex flex-col overflow-hidden max-w-[70%]">
-                <span className="text-[14px] font-medium text-(--text-primary) truncate">
-                  {tpl.text || "Медиа-сообщение (Без текста)"}
-                </span>
-              </div>
-              <div className="flex gap-3 text-[12px] text-(--text-secondary) shrink-0">
-                <button className="hover:text-(--text-primary) transition-colors">см.</button>
-                <button className="hover:text-red-500 transition-colors">удал.</button>
+        <div className="flex flex-col gap-3">
+          {templates.map(t => (
+            <div key={t.id} className="glass-card p-4 rounded-xl">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3 flex-1 min-w-0">
+                  <span className="text-2xl shrink-0">{mediaIcon(t.media_type)}</span>
+                  <div className="flex-1 min-w-0">
+                    <p
+                      className="text-[14px] leading-5 wrap-break-word"
+                      style={{ color: 'var(--text-primary)' }}
+                    >
+                      {t.preview}
+                    </p>
+                    <p className="text-[12px] mt-1" style={{ color: 'var(--text-secondary)' }}>
+                      Кнопка: «{t.button_text}»
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => handleDelete(t.id)}
+                  disabled={deletingId === t.id}
+                  className="shrink-0 text-[13px] px-3 py-1 rounded-lg"
+                  style={{ color: deletingId === t.id ? 'var(--text-secondary)' : '#E74C3C' }}
+                >
+                  {deletingId === t.id ? '...' : 'удалить'}
+                </button>
               </div>
             </div>
           ))}
         </div>
       )}
 
-      {/* Синяя круглая кнопка + (FAB) */}
-      <button 
-        onClick={handleAddTemplate}
-        className="fixed bottom-10 w-14 h-14 bg-[#1A8CFF] hover:bg-blue-500 rounded-full flex items-center justify-center text-white text-3xl shadow-lg shadow-blue-500/30 transition-transform active:scale-95"
-      >
-        +
-      </button>
-    </motion.main>
+      {/* FAB */}
+      {templates.length > 0 && (
+        <button
+          onClick={handleAdd}
+          className="fixed bottom-10 left-1/2 -translate-x-1/2 w-14 h-14 rounded-full flex items-center justify-center text-white text-3xl shadow-lg"
+          style={{ background: 'var(--accent-blue)' }}
+        >
+          +
+        </button>
+      )}
+    </main>
   );
 }

@@ -1,86 +1,141 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useTelegram } from '../providers/TelegramProvider';
 import NativeBackButton from '../../components/NativeBackButton';
-import { motion } from 'framer-motion';
+
+const API = 'https://api.randomway.pro';
+
+interface Channel {
+  id: number;
+  title: string;
+  username: string | null;
+  telegram_id: number;
+}
 
 export default function ChannelsPage() {
-  const { haptic } = useTelegram();
-  const [channels, setChannels] = useState<any[]>([]);
-  const[isLoading, setIsLoading] = useState(true);
+  const { initData, haptic } = useTelegram();
+  const router = useRouter();
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [addLink, setAddLink] = useState('');
 
-  // Загружаем каналы из БД
+  // Загружаем каналы и ссылку для добавления
   useEffect(() => {
-    const fetchChannels = async () => {
-      const tg = window.Telegram?.WebApp;
-      if (!tg?.initData) return;
-      try {
-        const res = await fetch(`https://api.randomway.pro/channels?initData=${encodeURIComponent(tg.initData)}`);
-        const data = await res.json();
-        setChannels(data.channels ||[]);
-      } catch (e) {
-        console.error(e);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    fetchChannels();
-  },[]);
+    if (!initData) return;
 
-  // Кнопка добавления канала (Перекидывает в бота)
-  const handleAddChannel = () => {
+    const encoded = encodeURIComponent(initData);
+
+    Promise.all([
+      fetch(`${API}/channels?initData=${encoded}`).then(r => r.json()),
+      fetch(`${API}/channels/add-link?initData=${encoded}`).then(r => r.json()),
+    ]).then(([channelsData, linkData]) => {
+      setChannels(channelsData.channels || []);
+      setAddLink(linkData.link || '');
+    }).catch(console.error)
+      .finally(() => setIsLoading(false));
+  }, [initData]);
+
+  const handleAdd = () => {
     haptic?.impactOccurred('medium');
-    const tg = window.Telegram?.WebApp;
-    // Нативная фича телеграма: открывает выбор каналов для добавления бота
-    tg?.openTelegramLink('https://t.me/ТВОЙ_БОТ?startchannel=true&admin=post_messages+edit_messages');
+    if (addLink) {
+      window.Telegram?.WebApp?.openTelegramLink(addLink);
+    }
+  };
+
+  const handleDelete = async (id: number) => {
+    if (!confirm('Удалить канал?')) return;
+    haptic?.impactOccurred('medium');
+    setDeletingId(id);
+
+    try {
+      const res = await fetch(
+        `${API}/channels/${id}?initData=${encodeURIComponent(initData)}`,
+        { method: 'DELETE' }
+      );
+      if (!res.ok) throw new Error();
+      setChannels(prev => prev.filter(ch => ch.id !== id));
+    } catch {
+      alert('Не удалось удалить канал');
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   return (
-    <motion.main 
-      initial={{ opacity: 0, x: 20 }}
-      animate={{ opacity: 1, x: 0 }}
-      className="min-h-screen p-4 pt-6 flex flex-col items-center"
-    >
+    <main className="min-h-screen p-4 pt-6 flex flex-col">
       <NativeBackButton />
 
-      <h1 className="text-2xl font-medium text-(--text-primary) mb-6">Каналы</h1>
+      <h1 className="text-2xl font-medium text-center mb-6" style={{ color: 'var(--text-primary)' }}>
+        Каналы
+      </h1>
 
       {isLoading ? (
-        <div className="animate-pulse text-(--text-secondary) mt-10">Загрузка...</div>
+        <p className="text-center mt-10" style={{ color: 'var(--text-secondary)' }}>Загрузка...</p>
       ) : channels.length === 0 ? (
-        <div className="text-(--text-secondary) mt-10 text-center">
-          <span className="text-4xl mb-2 block">🏛</span>
-          У вас пока нет добавленных каналов
+        <div className="flex flex-col items-center gap-4 mt-10">
+          <span className="text-5xl">🏛</span>
+          <p style={{ color: 'var(--text-secondary)' }}>У вас пока нет каналов</p>
+          <button
+            onClick={handleAdd}
+            className="px-6 py-3 rounded-xl text-white font-medium"
+            style={{ background: 'var(--accent-blue)' }}
+          >
+            Добавить первый канал
+          </button>
         </div>
       ) : (
-        <div className="w-full flex flex-col gap-3">
-          {channels.map((ch) => (
-            <div key={ch.id} className="glass-card p-4 rounded-xl flex items-center justify-between">
+        <div className="flex flex-col gap-3">
+          {channels.map(ch => (
+            <div
+              key={ch.id}
+              className="glass-card p-4 rounded-xl flex items-center justify-between"
+            >
               <div className="flex items-center gap-3">
-                {/* Аватарка (заглушка) */}
-                <div className="w-12 h-12 rounded-full bg-gray-300 dark:bg-gray-700 shrink-0"></div>
-                <div className="flex flex-col">
-                  <span className="text-[15px] font-medium text-(--text-primary)">{ch.title}</span>
-                  <span className="text-[12px] text-(--text-secondary)">Подписчиков: ...</span>
+                {/* Аватар-заглушка с первой буквой названия */}
+                <div
+                  className="w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg shrink-0"
+                  style={{ background: 'var(--accent-blue)' }}
+                >
+                  {ch.title[0].toUpperCase()}
+                </div>
+                <div>
+                  <p className="font-medium text-[15px]" style={{ color: 'var(--text-primary)' }}>
+                    {ch.title}
+                  </p>
+                  {ch.username && (
+                    <p className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>
+                      @{ch.username}
+                    </p>
+                  )}
                 </div>
               </div>
-              <div className="flex gap-3 text-[12px] text-(--text-secondary)">
-                <button className="hover:text-(--text-primary) transition-colors">обн.</button>
-                <button className="hover:text-red-500 transition-colors">удал.</button>
-              </div>
+
+              <button
+                onClick={() => handleDelete(ch.id)}
+                disabled={deletingId === ch.id}
+                className="text-[13px] px-3 py-1 rounded-lg transition-colors"
+                style={{ color: deletingId === ch.id ? 'var(--text-secondary)' : '#E74C3C' }}
+              >
+                {deletingId === ch.id ? '...' : 'удалить'}
+              </button>
             </div>
           ))}
         </div>
       )}
 
-      {/* Синяя круглая кнопка + (FAB) */}
-      <button 
-        onClick={handleAddChannel}
-        className="fixed bottom-10 w-14 h-14 bg-[#1A8CFF] hover:bg-blue-500 rounded-full flex items-center justify-center text-white text-3xl shadow-lg shadow-blue-500/30 transition-transform active:scale-95"
-      >
-        +
-      </button>
-    </motion.main>
+      {/* FAB — добавить канал */}
+      {channels.length > 0 && (
+        <button
+          onClick={handleAdd}
+          className="fixed bottom-10 left-1/2 -translate-x-1/2 w-14 h-14 rounded-full flex items-center justify-center text-white text-3xl shadow-lg"
+          style={{ background: 'var(--accent-blue)' }}
+        >
+          +
+        </button>
+      )}
+    </main>
   );
 }
