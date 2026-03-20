@@ -10,15 +10,46 @@ interface Channel {
   id: number;
   title: string;
   username: string | null;
-  telegram_id: number;
+  members_formatted: string;
+  has_photo: boolean;
+}
+
+// Аватар — либо фото из Telegram, либо цветной круг с буквой
+function ChannelAvatar({ channel, initData }: { channel: Channel; initData: string }) {
+  const [imgError, setImgError] = useState(false);
+  const photoUrl = `${API}/channels/${channel.id}/photo?initData=${encodeURIComponent(initData)}`;
+
+  if (channel.has_photo && !imgError) {
+    return (
+      <img
+        src={photoUrl}
+        alt={channel.title}
+        onError={() => setImgError(true)}
+        className="w-11 h-11 rounded-full object-cover shrink-0"
+      />
+    );
+  }
+
+  // Fallback — первая буква с градиентом
+  const colors = ['#1A8CFF', '#E020C0', '#2ECC71', '#E74C3C', '#F39C12'];
+  const color = colors[channel.id % colors.length];
+
+  return (
+    <div
+      className="w-11 h-11 rounded-full flex items-center justify-center text-white font-bold text-lg shrink-0"
+      style={{ background: color }}
+    >
+      {channel.title[0].toUpperCase()}
+    </div>
+  );
 }
 
 export default function ChannelsPage() {
   const { initData, haptic } = useTelegram();
   const [channels, setChannels] = useState<Channel[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [deletingId, setDeletingId] = useState<number | null>(null);
   const [addLink, setAddLink] = useState('');
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   useEffect(() => {
     if (!initData) return;
@@ -38,9 +69,7 @@ export default function ChannelsPage() {
 
   const handleAdd = () => {
     haptic?.impactOccurred('medium');
-    if (addLink) {
-      window.Telegram?.WebApp?.openTelegramLink(addLink);
-    }
+    if (addLink) window.Telegram?.WebApp?.openTelegramLink(addLink);
   };
 
   const handleDelete = async (id: number) => {
@@ -48,14 +77,12 @@ export default function ChannelsPage() {
     haptic?.impactOccurred('medium');
     setDeletingId(id);
     try {
-      const res = await fetch(
-        `${API}/channels/${id}?initData=${encodeURIComponent(initData)}`,
-        { method: 'DELETE' }
-      );
-      if (!res.ok) throw new Error();
+      await fetch(`${API}/channels/${id}?initData=${encodeURIComponent(initData)}`, {
+        method: 'DELETE',
+      });
       setChannels(prev => prev.filter(c => c.id !== id));
     } catch {
-      alert('Не удалось удалить канал');
+      alert('Не удалось удалить');
     } finally {
       setDeletingId(null);
     }
@@ -64,7 +91,6 @@ export default function ChannelsPage() {
   return (
     <main className="min-h-screen p-4 pt-6 flex flex-col">
       <NativeBackButton />
-
       <h1 className="text-2xl font-medium text-center mb-6" style={{ color: 'var(--text-primary)' }}>
         Каналы
       </h1>
@@ -72,11 +98,11 @@ export default function ChannelsPage() {
       {isLoading ? (
         <p className="text-center mt-10" style={{ color: 'var(--text-secondary)' }}>Загрузка...</p>
       ) : channels.length === 0 ? (
-        <div className="flex flex-col items-center gap-4 mt-10">
+        <div className="flex flex-col items-center gap-4 mt-10 text-center">
           <span className="text-5xl">🏛</span>
           <p style={{ color: 'var(--text-secondary)' }}>У вас пока нет каналов</p>
-          <p className="text-sm text-center" style={{ color: 'var(--text-secondary)' }}>
-            Нажмите кнопку ниже, выберите канал<br />и назначьте бота администратором
+          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+            Нажмите кнопку — Telegram предложит выбрать канал<br />и выдаст боту нужные права автоматически
           </p>
           <button
             onClick={handleAdd}
@@ -91,27 +117,21 @@ export default function ChannelsPage() {
           {channels.map(ch => (
             <div key={ch.id} className="glass-card p-4 rounded-xl flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div
-                  className="w-11 h-11 rounded-full flex items-center justify-center text-white font-bold text-lg shrink-0"
-                  style={{ background: 'var(--accent-blue)' }}
-                >
-                  {ch.title[0].toUpperCase()}
-                </div>
+                <ChannelAvatar channel={ch} initData={initData} />
                 <div>
                   <p className="font-medium text-[15px]" style={{ color: 'var(--text-primary)' }}>
                     {ch.title}
                   </p>
-                  {ch.username && (
-                    <p className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>
-                      @{ch.username}
-                    </p>
-                  )}
+                  <p className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>
+                    {ch.username ? `@${ch.username} · ` : ''}
+                    {ch.members_formatted} подписчиков
+                  </p>
                 </div>
               </div>
               <button
                 onClick={() => handleDelete(ch.id)}
                 disabled={deletingId === ch.id}
-                className="text-[13px] px-3 py-1 rounded-lg"
+                className="text-[13px] px-3 py-1 rounded-lg shrink-0"
                 style={{ color: deletingId === ch.id ? 'var(--text-secondary)' : '#E74C3C' }}
               >
                 {deletingId === ch.id ? '...' : 'удалить'}

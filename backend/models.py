@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, String, Boolean, DateTime, ForeignKey, Text, Enum
+from sqlalchemy import BigInteger, String, Boolean, DateTime, ForeignKey, Text, Enum, Integer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime, timezone
 import enum
@@ -6,7 +6,6 @@ from database import Base
 
 
 class GiveawayType(str, enum.Enum):
-    # Значения в UPPERCASE — совпадают с CHECK-констрейнтом миграции 3ba89ddc3c43
     STANDARD = "STANDARD"
     BOOSTS = "BOOSTS"
     INVITES = "INVITES"
@@ -38,6 +37,10 @@ class Channel(Base):
     username: Mapped[str | None] = mapped_column(String(255))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
+    # Новые поля — заполняются когда бот добавляется в канал
+    members_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    photo_file_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
     owner = relationship("User", back_populates="channels")
 
 
@@ -48,7 +51,7 @@ class PostTemplate(Base):
     owner_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.telegram_id"))
     text: Mapped[str] = mapped_column(Text)
     media_id: Mapped[str | None] = mapped_column(String(255))
-    media_type: Mapped[str | None] = mapped_column(String(50))
+    media_type: Mapped[str | None] = mapped_column(String(50))  # 'photo' | 'video' | 'animation'
     button_text: Mapped[str] = mapped_column(String(100), default="Участвовать")
     button_color: Mapped[str] = mapped_column(String(20), default="blue")
 
@@ -68,11 +71,8 @@ class Giveaway(Base):
         default=GiveawayType.STANDARD,
     )
     winners_count: Mapped[int] = mapped_column(default=1)
-
-    # nullable=True — черновик создаётся без дат; даты заполняются на шаге 9
     start_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     end_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-
     use_captcha: Mapped[bool] = mapped_column(Boolean, default=False)
     allow_stories: Mapped[bool] = mapped_column(Boolean, default=False)
     max_invites: Mapped[int] = mapped_column(default=0)
