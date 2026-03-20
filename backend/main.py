@@ -11,7 +11,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
+from aiogram.types import (
+    Message, InlineKeyboardMarkup, InlineKeyboardButton,
+    WebAppInfo, BotCommand
+)
 from aiogram.filters import CommandStart
 
 from handlers.channels import router as channels_router
@@ -32,28 +35,41 @@ dp.include_router(posts_router)
 
 @dp.message(CommandStart())
 async def start_default(message: Message):
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[[
-            InlineKeyboardButton(text="🎲 Открыть RandomWay", web_app=WebAppInfo(url=MINI_APP_URL))
-        ]]
-    )
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text="🎲 Открыть RandomWay",
+            web_app=WebAppInfo(url=MINI_APP_URL)
+        )
+    ]])
     await message.answer(
         "👋 Привет! Я <b>RandomWay</b> — бот для честных розыгрышей.\n\n"
-        "Нажми кнопку ниже чтобы начать 👇",
+        "📢 /newchannel — добавить канал или группу\n"
+        "💬 /newpost — создать шаблон поста\n\n"
+        "Или открой приложение кнопкой ниже 👇",
         reply_markup=keyboard,
     )
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Получаем username бота один раз при старте и кешируем в os.environ
-    # Это убирает необходимость хардкодить BOT_USERNAME в .env
+    # Кешируем username бота — используется в API для ссылок
     try:
         bot_info = await bot.get_me()
         os.environ["BOT_USERNAME"] = bot_info.username
-        logging.info(f"Bot username cached: @{bot_info.username}")
+        logging.info(f"Bot: @{bot_info.username}")
     except Exception as e:
-        logging.error(f"Failed to get bot info: {e}")
+        logging.error(f"get_me failed: {e}")
+
+    # Регистрируем команды в меню бота (появляются в "/" списке)
+    try:
+        await bot.set_my_commands([
+            BotCommand(command="newchannel", description="📢 Добавить канал или группу"),
+            BotCommand(command="newpost", description="💬 Создать шаблон поста"),
+            BotCommand(command="cancel", description="❌ Отменить текущее действие"),
+        ])
+        logging.info("Bot commands registered")
+    except Exception as e:
+        logging.error(f"set_my_commands failed: {e}")
 
     asyncio.create_task(dp.start_polling(bot))
     yield
@@ -75,7 +91,7 @@ app.include_router(api_router)
 
 @app.get("/")
 async def root():
-    return {"status": "ok", "message": "Бэкенд RandomWay работает! 🚀"}
+    return {"status": "ok", "message": "RandomWay backend 🚀"}
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@ import os
 
 from aiogram import Router, F
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
-from aiogram.filters import Command, CommandStart, CommandObject
+from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
@@ -26,40 +26,40 @@ def _mini_app_kb(text: str = "🎲 Открыть приложение") -> Inli
     ]])
 
 
-async def _show_post_prompt(message: Message, state: FSMContext):
+async def _show_prompt(message: Message, state: FSMContext):
     await state.set_state(PostStates.waiting_for_post)
     await message.answer(
         "💬 <b>Создание шаблона поста</b>\n\n"
         "Отправьте текст вашего поста.\n"
         "✨ Можно прислать текст с картинкой, видео или GIF.\n\n"
         f"📏 Максимум символов:\n"
-        f"• Только текст: <b>{MAX_TEXT_ONLY}</b>\n"
-        f"• С медиафайлом: <b>{MAX_WITH_MEDIA}</b>\n\n"
+        f"• Только текст: <b>{MAX_TEXT_ONLY:,}</b>\n"
+        f"• С медиафайлом: <b>{MAX_WITH_MEDIA:,}</b>\n\n"
         "🔥 Бот поддерживает кастомные эмодзи!\n\n"
-        "Для отмены 👉🏻 /cancel",
+        "Для отмены 👉 /cancel",
         parse_mode="HTML",
     )
 
 
-# ── /newpost — прямая команда (работает на мобильном без deep link) ───────────
+# ── Команды входа в режим создания поста ──────────────────────────────────────
 
+# Прямая команда /newpost — работает всегда (мобильный, десктоп)
 @router.message(Command("newpost"))
 async def cmd_newpost(message: Message, state: FSMContext):
-    await _show_post_prompt(message, state)
+    await _show_prompt(message, state)
 
 
-# ── ?start=add_post — deep link из Mini App ───────────────────────────────────
-# Используем F.text фильтр чтобы НЕ конфликтовать с channels.py
-
-@router.message(CommandStart(deep_link=True), F.text.endswith("add_post"))
+# Deep link ?start=add_post — из Mini App кнопки
+# F.text.contains("add_post") не конфликтует с channels.py (тот ловит add_channel)
+@router.message(CommandStart(deep_link=True), F.text.contains("add_post"))
 async def deep_add_post(message: Message, state: FSMContext):
-    await _show_post_prompt(message, state)
+    await _show_prompt(message, state)
 
 
 # ── Приём поста ───────────────────────────────────────────────────────────────
 
 @router.message(PostStates.waiting_for_post)
-async def process_post(message: Message, state: FSMContext):
+async def receive_post(message: Message, state: FSMContext):
     text = message.html_text or ""
     media_id = None
     media_type = None
@@ -74,18 +74,19 @@ async def process_post(message: Message, state: FSMContext):
         media_id = message.animation.file_id
         media_type = "animation"
 
-    max_len = MAX_WITH_MEDIA if media_id else MAX_TEXT_ONLY
-    if len(text) > max_len:
+    # Проверка лимита
+    limit = MAX_WITH_MEDIA if media_id else MAX_TEXT_ONLY
+    if len(text) > limit:
         await message.answer(
             f"❌ Текст слишком длинный: <b>{len(text)}</b> символов.\n"
-            f"Максимум {'с медиа' if media_id else 'без медиа'}: <b>{max_len}</b>.\n\n"
-            "Сократите и отправьте снова.",
+            f"Лимит {'с медиафайлом' if media_id else 'без медиа'}: <b>{limit:,}</b>.\n\n"
+            "Сократите текст и отправьте снова.",
             parse_mode="HTML",
         )
         return
 
     if not text and not media_id:
-        await message.answer("❌ Отправьте текст, фото, видео или GIF.")
+        await message.answer("❌ Пришлите текст, фото, видео или GIF.")
         return
 
     async with AsyncSessionLocal() as db:
@@ -99,12 +100,12 @@ async def process_post(message: Message, state: FSMContext):
 
     await state.clear()
 
-    media_label = {"photo": "📸 Фото", "video": "🎥 Видео", "animation": "🎞 GIF"}.get(
+    label = {"photo": "📸 Фото", "video": "🎥 Видео", "animation": "🎞 GIF"}.get(
         media_type, "📝 Текст"
     )
     await message.answer(
         f"🎉 Пост создан и сохранён!\n\n"
-        f"{media_label} · {len(text)} символов\n\n"
+        f"{label} · {len(text)} симв.\n\n"
         "Вернитесь в приложение 👇",
         reply_markup=_mini_app_kb("🎲 Вернуться к розыгрышу"),
         parse_mode="HTML",
