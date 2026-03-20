@@ -11,7 +11,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
+from aiogram.types import (
+    Message, InlineKeyboardMarkup, InlineKeyboardButton,
+    ReplyKeyboardMarkup, KeyboardButton, WebAppInfo, ReplyKeyboardRemove
+)
 from aiogram.filters import CommandStart
 
 from handlers.channels import router as channels_router
@@ -26,30 +29,49 @@ MINI_APP_URL = os.getenv("MINI_APP_URL", "https://randomway.pro/")
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
-# handlers подключаем ДО default /start — они перехватывают deep links
 dp.include_router(channels_router)
 dp.include_router(posts_router)
 
 
+def _main_keyboard() -> ReplyKeyboardMarkup:
+    """
+    Постоянная клавиатура в боте.
+    Пользователь видит эти кнопки всегда когда открывает бота.
+    Именно так работают конкуренты — openTelegramLink открывает бот,
+    пользователь видит кнопки и тапает нужную.
+    """
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(text="📢 Добавить канал"),
+                KeyboardButton(text="👥 Добавить группу"),
+            ],
+            [
+                KeyboardButton(text="💬 Создать пост"),
+            ],
+            [
+                KeyboardButton(
+                    text="🎲 Открыть приложение",
+                    web_app=WebAppInfo(url=MINI_APP_URL)
+                ),
+            ],
+        ],
+        resize_keyboard=True,       # компактный размер
+        persistent=True,            # всегда видна, не скрывается
+    )
+
+
 @dp.message(CommandStart())
 async def start_default(message: Message):
-    """Чистый /start — только кнопка открыть мини-апп, никаких команд"""
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(
-            text="🎲 Открыть RandomWay",
-            web_app=WebAppInfo(url=MINI_APP_URL)
-        )
-    ]])
     await message.answer(
         "👋 Привет! Я <b>RandomWay</b> — бот для честных розыгрышей.\n\n"
-        "Нажми кнопку ниже чтобы начать 👇",
-        reply_markup=keyboard,
+        "Используйте кнопки ниже 👇",
+        reply_markup=_main_keyboard(),
     )
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Кешируем username бота — нужен фронту для deep links
     try:
         bot_info = await bot.get_me()
         os.environ["BOT_USERNAME"] = bot_info.username
@@ -57,7 +79,6 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logging.error(f"get_me failed: {e}")
 
-    # Очищаем команды из меню — пользователь управляет через мини-апп
     try:
         await bot.delete_my_commands()
     except Exception:

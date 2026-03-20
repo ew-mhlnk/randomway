@@ -53,7 +53,10 @@ export default function ChannelsPage() {
 
   const handleAdd = () => {
     haptic?.impactOccurred('medium');
-    window.Telegram!.WebApp.openTelegramLink(`https://t.me/${BOT}?start=add_channel`);
+    // Открываем чат с ботом — там внизу постоянная клавиатура с кнопками
+    // «📢 Добавить канал» и «👥 Добавить группу»
+    // Пользователь тапает нужную — бот реагирует
+    window.Telegram!.WebApp.openTelegramLink(`https://t.me/${BOT}`);
   };
 
   const handleDelete = async (id: number) => {
@@ -79,7 +82,7 @@ export default function ChannelsPage() {
           <span className="text-5xl">🏛</span>
           <p style={{ color: 'var(--text-secondary)' }}>Каналов пока нет</p>
           <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-            Нажмите кнопку — откроется бот, там выберете канал или группу
+            Нажмите кнопку — перейдёте в бота, там нажмите<br />«📢 Добавить канал» или «👥 Добавить группу»
           </p>
           <button onClick={handleAdd} className="px-6 py-3 rounded-xl text-white font-medium"
                   style={{ background: 'var(--accent-blue)' }}>

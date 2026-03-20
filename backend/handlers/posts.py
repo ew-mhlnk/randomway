@@ -2,7 +2,7 @@ import os
 
 from aiogram import Router, F
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
@@ -26,14 +26,14 @@ def _back_kb() -> InlineKeyboardMarkup:
     ]])
 
 
-# ── /start add_post — приходит из Mini App ────────────────────────────────────
+# ── Кнопка «💬 Создать пост» (Reply Keyboard) ─────────────────────────────────
 
-@router.message(CommandStart(deep_link=True), F.text.contains("add_post"))
-async def start_add_post(message: Message, state: FSMContext):
+@router.message(F.text == "💬 Создать пост")
+async def btn_create_post(message: Message, state: FSMContext):
     await state.set_state(PostStates.waiting_for_post)
     await message.answer(
         "💬 Отправьте мне текст вашего поста.\n"
-        "✨ Вы можете прислать текст с картинкой или видео.\n\n"
+        "✨ Вы можете прислать текст с картинкой, видео или GIF.\n\n"
         f"📏 Максимум символов:\n"
         f"• Только текст: <b>{MAX_TEXT:,}</b>\n"
         f"• С медиафайлом: <b>{MAX_MEDIA:,}</b>\n\n"
@@ -43,7 +43,7 @@ async def start_add_post(message: Message, state: FSMContext):
     )
 
 
-# ── Приём поста от пользователя ───────────────────────────────────────────────
+# ── Приём поста ───────────────────────────────────────────────────────────────
 
 @router.message(PostStates.waiting_for_post)
 async def receive_post(message: Message, state: FSMContext):
