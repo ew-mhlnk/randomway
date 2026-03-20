@@ -1,4 +1,6 @@
-from aiogram import Router, F
+import os
+
+from aiogram import Router
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from aiogram.filters import CommandStart, CommandObject, Command
 from aiogram.fsm.context import FSMContext
@@ -6,18 +8,20 @@ from aiogram.fsm.state import State, StatesGroup
 
 from database import AsyncSessionLocal
 from models import PostTemplate
-import os
 
 router = Router()
 MINI_APP_URL = os.getenv("MINI_APP_URL", "https://randomway.pro/")
 
+
 class PostStates(StatesGroup):
     waiting_for_post = State()
+
 
 @router.message(Command("cancel"))
 async def cancel_handler(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("❌ Действие отменено. Возвращайтесь в приложение.")
+
 
 @router.message(CommandStart(deep_link=True))
 async def start_add_post(message: Message, command: CommandObject, state: FSMContext):
@@ -29,6 +33,7 @@ async def start_add_post(message: Message, command: CommandObject, state: FSMCon
             "🔥 Бот поддерживает кастомные эмодзи!\n\n"
             "Для отмены нажмите 👉🏻 /cancel"
         )
+
 
 @router.message(PostStates.waiting_for_post)
 async def process_post_addition(message: Message, state: FSMContext):
@@ -52,11 +57,15 @@ async def process_post_addition(message: Message, state: FSMContext):
             owner_id=message.from_user.id,
             text=text,
             media_id=media_id,
-            media_type=media_type
+            media_type=media_type,
         )
         db.add(new_post)
         await db.commit()
 
     await state.clear()
-    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🎲 Вернуться к розыгрышу", web_app=WebAppInfo(url=MINI_APP_URL))]])
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🎲 Вернуться к розыгрышу", web_app=WebAppInfo(url=MINI_APP_URL))]
+        ]
+    )
     await message.answer("🎉 Пост создан и сохранен!\nМожете вернуться в приложение.", reply_markup=kb)

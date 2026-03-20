@@ -1,82 +1,87 @@
 import logging
-from aiogram import Router, F, Bot
+import os
+
+from aiogram import Router, Bot
 from aiogram.types import Message, ChatMemberUpdated, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
-from aiogram.filters import Command, CommandStart, CommandObject
+from aiogram.filters import CommandStart, CommandObject
 from aiogram.filters.chat_member_updated import ChatMemberUpdatedFilter, IS_NOT_MEMBER, ADMINISTRATOR
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 from sqlalchemy.future import select
 from database import AsyncSessionLocal
-from models import Channel, User
-import os
+from models import Channel
 
 router = Router()
 MINI_APP_URL = os.getenv("MINI_APP_URL", "https://randomway.pro/")
 
+
 class ChannelStates(StatesGroup):
     waiting_for_channel = State()
 
-# === 1. МАГИЯ: Автоматическое добавление через нативное меню ===
+
 @router.my_chat_member(ChatMemberUpdatedFilter(member_status_changed=IS_NOT_MEMBER >> ADMINISTRATOR))
 async def bot_added_as_admin(event: ChatMemberUpdated):
-    """Срабатывает АВТОМАТИЧЕСКИ, когда юзер добавляет бота в канал как админа"""
+    """Срабатывает автоматически, когда бот добавлен в канал как админ"""
     chat = event.chat
-    user_id = event.from_user.id # Тот, кто добавил бота
+    user_id = event.from_user.id
 
     async with AsyncSessionLocal() as db:
-        # Проверяем, есть ли уже канал в базе
         existing = await db.scalar(select(Channel).where(Channel.telegram_id == chat.id))
         if not existing:
             new_channel = Channel(
                 telegram_id=chat.id,
                 owner_id=user_id,
                 title=chat.title,
-                username=chat.username
+                username=chat.username,
             )
             db.add(new_channel)
             await db.commit()
 
-    # Отправляем юзеру в личку сообщение об успехе
-    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🎲 Открыть приложение", web_app=WebAppInfo(url=MINI_APP_URL))]])
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🎲 Открыть приложение", web_app=WebAppInfo(url=MINI_APP_URL))]
+        ]
+    )
     try:
         await event.bot.send_message(
             chat_id=user_id,
             text=f"🎉 Канал <b>{chat.title}</b> добавлен успешно!\nТеперь вы можете добавлять его в розыгрыши.",
             reply_markup=kb,
-            parse_mode="HTML"
+            parse_mode="HTML",
         )
     except Exception as e:
         logging.error(f"Не удалось отправить сообщение юзеру: {e}")
 
-# === 2. РУЧНОЕ ДОБАВЛЕНИЕ (Запасной вариант /fallback) ===
+
 @router.message(CommandStart(deep_link=True))
 async def add_channel_fallback(message: Message, command: CommandObject, state: FSMContext, bot: Bot):
     if command.args == "add_channel":
         await state.set_state(ChannelStates.waiting_for_channel)
-        
-        # Генерируем ту самую нативную ссылку для добавления канала
+
         bot_info = await bot.get_me()
         native_link = f"https://t.me/{bot_info.username}?startchannel=true&admin=post_messages+edit_messages"
-        
-        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="➕ Добавить канал (Удобно)", url=native_link)]
-        ])
-        
+
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="➕ Добавить канал", url=native_link)]
+            ]
+        )
         await message.answer(
             "💬 Пришлите <b>username</b> канала в формате @durov или <b>перешлите сообщение</b> из канала.\n\n"
             "⚠️ Бот должен быть админом канала с правами на публикацию.\n\n"
             "Для отмены нажмите 👉🏻 /cancel\n\n"
-            "🔥 <b>Вы также можете добавить канал с помощью кнопки ниже (это удобно - бот сам добавится в админы) 👇🏻</b>",
-            reply_markup=kb
+            "🔥 <b>Или добавьте канал кнопкой ниже 👇🏻</b>",
+            reply_markup=kb,
         )
+
 
 @router.message(ChannelStates.waiting_for_channel)
 async def process_manual_channel(message: Message, state: FSMContext, bot: Bot):
-    """Обработка пересланного сообщения (ручной метод)"""
     channel_id = None
-    if message.forward_origin and message.forward_origin.type == 'channel':
+    if message.forward_origin and message.forward_origin.type == "channel":
         channel_id = message.forward_origin.chat.id
-    elif message.text and message.text.startswith('@'):
+    elif message.text and message.text.startswith("@"):
         channel_id = message.text
 
     if not channel_id:
@@ -94,11 +99,22 @@ async def process_manual_channel(message: Message, state: FSMContext, bot: Bot):
         async with AsyncSessionLocal() as db:
             existing = await db.scalar(select(Channel).where(Channel.telegram_id == chat.id))
             if not existing:
-                db.add(Channel(telegram_id=chat.id, owner_id=message.from_user.id, title=chat.title, username=chat.username))
+                db.add(
+                    Channel(
+                        telegram_id=chat.id,
+                        owner_id=message.from_user.id,
+                        title=chat.title,
+                        username=chat.username,
+                    )
+                )
                 await db.commit()
 
         await state.clear()
-        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🎲 Открыть приложение", web_app=WebAppInfo(url=MINI_APP_URL))]])
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="🎲 Открыть приложение", web_app=WebAppInfo(url=MINI_APP_URL))]
+            ]
+        )
         await message.answer(f"🎉 Канал <b>{chat.title}</b> добавлен успешно!", reply_markup=kb)
     except Exception:
         await message.answer("❌ Ошибка. Убедитесь, что бот в канале и вы ввели верный @username.")

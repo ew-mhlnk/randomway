@@ -5,22 +5,25 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Делаем пуленепробиваемую замену префиксов URL
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://")
 DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
 
-# Создаем движок
-engine = create_async_engine(DATABASE_URL, echo=False)
+# statement_cache_size=0 — обязательно при использовании pgBouncer
+# (transaction pooling mode несовместим с prepared statements asyncpg)
+engine = create_async_engine(
+    DATABASE_URL,
+    echo=False,
+    connect_args={"statement_cache_size": 0},
+)
 
-# Создаем фабрику сессий
 AsyncSessionLocal = async_sessionmaker(bind=engine, expire_on_commit=False)
 
-# Базовый класс для всех моделей
+
 class Base(AsyncAttrs, DeclarativeBase):
     pass
 
-# Dependency для FastAPI (будем использовать позже)
+
 async def get_db():
     async with AsyncSessionLocal() as session:
         yield session
