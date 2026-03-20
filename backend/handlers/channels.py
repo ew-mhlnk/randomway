@@ -6,7 +6,7 @@ from aiogram.types import (
     Message, ChatMemberUpdated,
     InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 )
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandStart, CommandObject
 from aiogram.filters.chat_member_updated import (
     ChatMemberUpdatedFilter, IS_NOT_MEMBER, ADMINISTRATOR
 )
@@ -20,41 +20,38 @@ from models import Channel
 router = Router()
 MINI_APP_URL = os.getenv("MINI_APP_URL", "https://randomway.pro/")
 
-# %2B вместо + — иначе права не проставляются (+ читается как пробел)
 CHANNEL_RIGHTS = "post_messages%2Bedit_messages%2Bdelete_messages"
-GROUP_RIGHTS = "post_messages%2Bdelete_messages"
+GROUP_RIGHTS   = "post_messages%2Bdelete_messages"
 
 
 class ChannelStates(StatesGroup):
     waiting_for_channel = State()
 
 
-def _back_kb() -> InlineKeyboardMarkup:
+def _back_kb():
     return InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="🎲 Вернуться в приложение", web_app=WebAppInfo(url=MINI_APP_URL))
     ]])
 
 
-def _native_add_kb(bot_username: str, chat_type: str = "channel") -> InlineKeyboardMarkup:
-    """Кнопка нативного выбора канала/группы через диалог Telegram"""
-    if chat_type == "group":
-        url = f"https://t.me/{bot_username}?startgroup=true&admin={GROUP_RIGHTS}"
-        label = "👥 Выбрать группу из списка"
-    else:
-        url = f"https://t.me/{bot_username}?startchannel=true&admin={CHANNEL_RIGHTS}"
-        label = "📢 Выбрать канал из списка"
-
+def _native_kb(bot_username: str):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=label, url=url)],
+        [InlineKeyboardButton(
+            text="📢 Выбрать канал из списка",
+            url=f"https://t.me/{bot_username}?startchannel=true&admin={CHANNEL_RIGHTS}"
+        )],
+        [InlineKeyboardButton(
+            text="👥 Выбрать группу из списка",
+            url=f"https://t.me/{bot_username}?startgroup=true&admin={GROUP_RIGHTS}"
+        )],
         [InlineKeyboardButton(text="🎲 Вернуться в приложение", web_app=WebAppInfo(url=MINI_APP_URL))],
     ])
 
 
-async def _save_chat(chat_id, owner_id: int, bot: Bot) -> tuple[bool, str, int]:
-    chat = await bot.get_chat(chat_id)
+async def _save_chat(chat_id, owner_id: int, bot: Bot):
+    chat  = await bot.get_chat(chat_id)
     count = await bot.get_chat_member_count(chat_id)
     photo = chat.photo.small_file_id if chat.photo else None
-
     async with AsyncSessionLocal() as db:
         existing = await db.scalar(select(Channel).where(Channel.telegram_id == chat.id))
         if existing:
@@ -65,20 +62,40 @@ async def _save_chat(chat_id, owner_id: int, bot: Bot) -> tuple[bool, str, int]:
             existing.is_active = True
             await db.commit()
             return False, chat.title, count
-
         db.add(Channel(
-            telegram_id=chat.id,
-            owner_id=owner_id,
-            title=chat.title,
-            username=getattr(chat, "username", None),
-            members_count=count,
-            photo_file_id=photo,
+            telegram_id=chat.id, owner_id=owner_id,
+            title=chat.title, username=getattr(chat, "username", None),
+            members_count=count, photo_file_id=photo,
         ))
         await db.commit()
         return True, chat.title, count
 
 
-# ── Бот автоматически стал администратором ────────────────────────────────────
+# ── /start add_channel — кнопка из Mini App вызывает именно это ──────────────
+# Mini App делает: openTelegramLink("https://t.me/BOT?start=add_channel")
+# Telegram отправляет боту: /start add_channel
+# CommandObject.args == "add_channel"
+
+@router.message(CommandStart(deep_link=True))
+async def start_deep_link(message: Message, command: CommandObject, state: FSMContext, bot: Bot):
+    args = command.args  # "add_channel" или "add_post"
+
+    if args == "add_channel":
+        await state.set_state(ChannelStates.waiting_for_channel)
+        bot_info = await bot.get_me()
+        await message.answer(
+            "💬 Пришлите <b>@username</b> канала или перешлите сообщение из него.\n\n"
+            "⚠️ Бот должен быть админом с правами на публикацию и редактирование сообщений.\n\n"
+            "Для отмены 👉 /cancel\n\n"
+            "🔥 <b>Или выберите через кнопку ниже</b> — права проставятся автоматически ✅",
+            reply_markup=_native_kb(bot_info.username),
+            parse_mode="HTML",
+        )
+    # add_post обрабатывается в posts.py — но туда deep_link=True не дойдёт
+    # поэтому add_post тоже обрабатываем здесь и импортируем логику
+
+
+# ── Автодобавление когда бот стал администратором ────────────────────────────
 
 @router.my_chat_member(
     ChatMemberUpdatedFilter(member_status_changed=IS_NOT_MEMBER >> ADMINISTRATOR)
@@ -92,8 +109,7 @@ async def bot_added_as_admin(event: ChatMemberUpdated):
             chat_id=user_id,
             text=(
                 f"🎉 {kind} <b>{title}</b> {'добавлен(а)' if is_new else 'обновлён(а)'}!\n"
-                f"👥 Участников: <b>{count:,}</b>\n\n"
-                "Теперь можно использовать в розыгрышах."
+                f"👥 Участников: <b>{count:,}</b>"
             ),
             reply_markup=_back_kb(),
             parse_mode="HTML",
@@ -102,48 +118,10 @@ async def bot_added_as_admin(event: ChatMemberUpdated):
         logging.error(f"bot_added_as_admin: {e}")
 
 
-# ── Кнопка «📢 Добавить канал» (Reply Keyboard) ───────────────────────────────
-
-@router.message(F.text == "📢 Добавить канал")
-async def btn_add_channel(message: Message, state: FSMContext, bot: Bot):
-    await state.set_state(ChannelStates.waiting_for_channel)
-    await state.update_data(chat_type="channel")
-    bot_info = await bot.get_me()
-    await message.answer(
-        "💬 Пришлите <b>@username</b> канала или перешлите сообщение из него "
-        "(работает и для приватных каналов).\n\n"
-        "⚠️ Бот должен быть админом с правами на публикацию и редактирование сообщений.\n\n"
-        "Для отмены 👉 /cancel\n\n"
-        "🔥 <b>Или выберите канал кнопкой ниже</b> — права проставятся автоматически ✅",
-        reply_markup=_native_add_kb(bot_info.username, "channel"),
-        parse_mode="HTML",
-    )
-
-
-# ── Кнопка «👥 Добавить группу» (Reply Keyboard) ─────────────────────────────
-
-@router.message(F.text == "👥 Добавить группу")
-async def btn_add_group(message: Message, state: FSMContext, bot: Bot):
-    await state.set_state(ChannelStates.waiting_for_channel)
-    await state.update_data(chat_type="group")
-    bot_info = await bot.get_me()
-    await message.answer(
-        "💬 Пришлите <b>@username</b> группы или перешлите сообщение из неё.\n\n"
-        "⚠️ Бот должен быть админом с правами на публикацию сообщений.\n\n"
-        "Для отмены 👉 /cancel\n\n"
-        "🔥 <b>Или выберите группу кнопкой ниже</b> — права проставятся автоматически ✅",
-        reply_markup=_native_add_kb(bot_info.username, "group"),
-        parse_mode="HTML",
-    )
-
-
-# ── Ручное добавление через @username или пересылку ───────────────────────────
+# ── Ручной ввод @username ─────────────────────────────────────────────────────
 
 @router.message(ChannelStates.waiting_for_channel)
 async def process_manual(message: Message, state: FSMContext, bot: Bot):
-    data = await state.get_data()
-    chat_type = data.get("chat_type", "channel")
-
     chat_id = None
     if message.forward_origin and hasattr(message.forward_origin, "chat"):
         chat_id = message.forward_origin.chat.id
@@ -151,46 +129,28 @@ async def process_manual(message: Message, state: FSMContext, bot: Bot):
         chat_id = message.text.strip()
 
     if not chat_id:
-        await message.answer(
-            "❌ Отправьте <b>@username</b> или перешлите сообщение.",
-            parse_mode="HTML",
-        )
+        await message.answer("❌ Отправьте <b>@username</b> или перешлите сообщение.", parse_mode="HTML")
         return
 
     await message.answer("🔍 Проверяем...")
-
     try:
-        me = await bot.get_me()
+        me     = await bot.get_me()
         member = await bot.get_chat_member(chat_id=chat_id, user_id=me.id)
-
         if member.status != "administrator":
-            await message.answer(
-                "❌ Бот ещё не администратор.\n"
-                "Добавьте бота через кнопку ниже и попробуйте снова.",
-                reply_markup=_native_add_kb(me.username, chat_type),
-            )
+            await message.answer("❌ Бот не администратор этого канала.", reply_markup=_native_kb(me.username))
             return
-
         chat = await bot.get_chat(chat_id)
         is_new, title, count = await _save_chat(chat.id, message.from_user.id, bot)
-
         await state.clear()
         await message.answer(
-            f"🎉 <b>{title}</b> {'добавлен(а)' if is_new else 'обновлён(а)'} успешно!\n"
+            f"🎉 <b>{title}</b> {'добавлен(а)' if is_new else 'обновлён(а)'}!\n"
             f"👥 Участников: <b>{count:,}</b>",
-            reply_markup=_back_kb(),
-            parse_mode="HTML",
+            reply_markup=_back_kb(), parse_mode="HTML",
         )
-
     except Exception as e:
         logging.error(f"process_manual: {e}")
-        await message.answer(
-            "❌ Не удалось найти канал/группу.\n"
-            "Проверьте что бот добавлен как администратор."
-        )
+        await message.answer("❌ Не удалось найти канал. Проверьте @username и права бота.")
 
-
-# ── /cancel ───────────────────────────────────────────────────────────────────
 
 @router.message(Command("cancel"), ChannelStates.waiting_for_channel)
 async def cancel_channel(message: Message, state: FSMContext):

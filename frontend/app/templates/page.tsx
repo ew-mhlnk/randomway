@@ -31,8 +31,9 @@ export default function TemplatesPage() {
 
   const handleAdd = () => {
     haptic?.impactOccurred('medium');
-    // Открываем бота — там клавиатура с кнопкой «💬 Создать пост»
-    window.Telegram!.WebApp.openTelegramLink(`https://t.me/${BOT}`);
+    // Закрывает мини-апп → открывает бота → бот получает /start add_post
+    // → обработчик handle_deep_link в main.py → _show_prompt() → просит прислать пост
+    window.Telegram!.WebApp.openTelegramLink(`https://t.me/${BOT}?start=add_post`);
   };
 
   const handleDelete = async (id: number) => {
@@ -59,9 +60,6 @@ export default function TemplatesPage() {
         <div className="flex flex-col items-center gap-4 mt-10 text-center">
           <span className="text-5xl">📝</span>
           <p style={{ color: 'var(--text-secondary)' }}>Шаблонов пока нет</p>
-          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-            Нажмите кнопку — перейдёте в бота, там нажмите<br />«💬 Создать пост»
-          </p>
           <button onClick={handleAdd} className="px-6 py-3 rounded-xl text-white font-medium"
                   style={{ background: 'var(--accent-blue)' }}>
             Создать шаблон

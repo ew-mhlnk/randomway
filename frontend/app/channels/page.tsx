@@ -5,6 +5,7 @@ import { useTelegram } from '../providers/TelegramProvider';
 import NativeBackButton from '../../components/NativeBackButton';
 
 const API = 'https://api.randomway.pro';
+// NEXT_PUBLIC_BOT_USERNAME задаётся в переменных окружения Coolify (фронт)
 const BOT = process.env.NEXT_PUBLIC_BOT_USERNAME!;
 
 interface Channel {
@@ -53,10 +54,9 @@ export default function ChannelsPage() {
 
   const handleAdd = () => {
     haptic?.impactOccurred('medium');
-    // Открываем чат с ботом — там внизу постоянная клавиатура с кнопками
-    // «📢 Добавить канал» и «👥 Добавить группу»
-    // Пользователь тапает нужную — бот реагирует
-    window.Telegram!.WebApp.openTelegramLink(`https://t.me/${BOT}`);
+    // Закрывает мини-апп → открывает бота → бот получает /start add_channel
+    // → обработчик handle_deep_link в main.py → channel_deep() → показывает меню
+    window.Telegram!.WebApp.openTelegramLink(`https://t.me/${BOT}?start=add_channel`);
   };
 
   const handleDelete = async (id: number) => {
@@ -81,9 +81,6 @@ export default function ChannelsPage() {
         <div className="flex flex-col items-center gap-4 mt-10 text-center">
           <span className="text-5xl">🏛</span>
           <p style={{ color: 'var(--text-secondary)' }}>Каналов пока нет</p>
-          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-            Нажмите кнопку — перейдёте в бота, там нажмите<br />«📢 Добавить канал» или «👥 Добавить группу»
-          </p>
           <button onClick={handleAdd} className="px-6 py-3 rounded-xl text-white font-medium"
                   style={{ background: 'var(--accent-blue)' }}>
             Добавить канал
