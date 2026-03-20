@@ -11,10 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
-from aiogram.types import (
-    Message, InlineKeyboardMarkup, InlineKeyboardButton,
-    WebAppInfo, BotCommand
-)
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from aiogram.filters import CommandStart
 
 from handlers.channels import router as channels_router
@@ -29,12 +26,14 @@ MINI_APP_URL = os.getenv("MINI_APP_URL", "https://randomway.pro/")
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
+# handlers подключаем ДО default /start — они перехватывают deep links
 dp.include_router(channels_router)
 dp.include_router(posts_router)
 
 
 @dp.message(CommandStart())
 async def start_default(message: Message):
+    """Чистый /start — только кнопка открыть мини-апп, никаких команд"""
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(
             text="🎲 Открыть RandomWay",
@@ -43,16 +42,14 @@ async def start_default(message: Message):
     ]])
     await message.answer(
         "👋 Привет! Я <b>RandomWay</b> — бот для честных розыгрышей.\n\n"
-        "📢 /newchannel — добавить канал или группу\n"
-        "💬 /newpost — создать шаблон поста\n\n"
-        "Или открой приложение кнопкой ниже 👇",
+        "Нажми кнопку ниже чтобы начать 👇",
         reply_markup=keyboard,
     )
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Кешируем username бота — используется в API для ссылок
+    # Кешируем username бота — нужен фронту для deep links
     try:
         bot_info = await bot.get_me()
         os.environ["BOT_USERNAME"] = bot_info.username
@@ -60,16 +57,11 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logging.error(f"get_me failed: {e}")
 
-    # Регистрируем команды в меню бота (появляются в "/" списке)
+    # Очищаем команды из меню — пользователь управляет через мини-апп
     try:
-        await bot.set_my_commands([
-            BotCommand(command="newchannel", description="📢 Добавить канал или группу"),
-            BotCommand(command="newpost", description="💬 Создать шаблон поста"),
-            BotCommand(command="cancel", description="❌ Отменить текущее действие"),
-        ])
-        logging.info("Bot commands registered")
-    except Exception as e:
-        logging.error(f"set_my_commands failed: {e}")
+        await bot.delete_my_commands()
+    except Exception:
+        pass
 
     asyncio.create_task(dp.start_polling(bot))
     yield
@@ -91,7 +83,7 @@ app.include_router(api_router)
 
 @app.get("/")
 async def root():
-    return {"status": "ok", "message": "RandomWay backend 🚀"}
+    return {"status": "ok", "message": "RandomWay 🚀"}
 
 
 if __name__ == "__main__":

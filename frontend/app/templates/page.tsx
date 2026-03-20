@@ -26,24 +26,22 @@ export default function TemplatesPage() {
 
     Promise.all([
       fetch(`${API}/templates?initData=${enc}`).then(r => r.json()),
-      fetch(`${API}/channels/add-link?initData=${enc}`).then(r => r.json()),
-    ]).then(([tmpl, lnk]) => {
+      fetch(`${API}/bot-info?initData=${enc}`).then(r => r.json()),
+    ]).then(([tmpl, info]) => {
       setTemplates(tmpl.templates ?? []);
-      // Извлекаем username бота из ссылки
-      const u = lnk.bot_username ?? '';
-      setBotUsername(u);
+      setBotUsername(info.username ?? '');
     }).catch(console.error)
       .finally(() => setIsLoading(false));
   }, [initData]);
 
+  // Открываем БОТА с командой add_post — бот покажет инструкцию по созданию поста
   const handleAdd = () => {
     haptic?.impactOccurred('medium');
-    if (!botUsername) return;
-    // /newpost работает и на десктопе и на мобильном
-    // openTelegramLink открывает бота, пользователь видит инструкцию
-    window.Telegram?.WebApp?.openTelegramLink(
-      `https://t.me/${botUsername}?start=add_post`
-    );
+    if (botUsername) {
+      window.Telegram?.WebApp?.openTelegramLink(
+        `https://t.me/${botUsername}?start=add_post`
+      );
+    }
   };
 
   const handleDelete = async (id: number) => {
@@ -51,20 +49,13 @@ export default function TemplatesPage() {
     haptic?.impactOccurred('medium');
     setDeletingId(id);
     try {
-      await fetch(`${API}/templates/${id}?initData=${encodeURIComponent(initData)}`, {
-        method: 'DELETE',
-      });
+      await fetch(`${API}/templates/${id}?initData=${encodeURIComponent(initData)}`, { method: 'DELETE' });
       setTemplates(prev => prev.filter(t => t.id !== id));
-    } catch {
-      alert('Не удалось удалить');
-    } finally {
-      setDeletingId(null);
-    }
+    } catch { alert('Не удалось удалить'); }
+    finally { setDeletingId(null); }
   };
 
-  const mediaIcon = (type: string | null) => (
-    { photo: '🖼', video: '🎥', animation: '🎞' }[type ?? ''] ?? '📝'
-  );
+  const mediaIcon = (t: string | null) => ({ photo:'🖼', video:'🎥', animation:'🎞' }[t??''] ?? '📝');
 
   return (
     <main className="min-h-screen p-4 pt-6 flex flex-col">
@@ -80,14 +71,10 @@ export default function TemplatesPage() {
           <span className="text-5xl">📝</span>
           <p style={{ color: 'var(--text-secondary)' }}>Шаблонов пока нет</p>
           <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-            Шаблон — это текст поста о розыгрыше.<br />
-            Создаётся через бота, поддерживает фото, видео, GIF.
+            Шаблон создаётся через бота — можно с фото, видео или GIF
           </p>
-          <button
-            onClick={handleAdd}
-            className="px-6 py-3 rounded-xl text-white font-medium"
-            style={{ background: 'var(--accent-blue)' }}
-          >
+          <button onClick={handleAdd} className="px-6 py-3 rounded-xl text-white font-medium"
+                  style={{ background: 'var(--accent-blue)' }}>
             Создать шаблон
           </button>
         </div>
@@ -98,21 +85,16 @@ export default function TemplatesPage() {
               <div className="flex items-start gap-3">
                 <span className="text-2xl shrink-0">{mediaIcon(t.media_type)}</span>
                 <div className="flex-1 min-w-0">
-                  <p className="text-[14px] leading-5" style={{
-                    color: 'var(--text-primary)', wordBreak: 'break-word'
-                  }}>
+                  <p className="text-[14px] leading-5" style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>
                     {t.preview}
                   </p>
                   <p className="text-[12px] mt-1" style={{ color: 'var(--text-secondary)' }}>
                     Кнопка: «{t.button_text}»
                   </p>
                 </div>
-                <button
-                  onClick={() => handleDelete(t.id)}
-                  disabled={deletingId === t.id}
-                  className="shrink-0 text-[13px] px-3 py-1 rounded-lg"
-                  style={{ color: deletingId === t.id ? 'var(--text-secondary)' : '#E74C3C' }}
-                >
+                <button onClick={() => handleDelete(t.id)} disabled={deletingId === t.id}
+                        className="shrink-0 text-[13px] px-3 py-1 rounded-lg"
+                        style={{ color: deletingId === t.id ? 'var(--text-secondary)' : '#E74C3C' }}>
                   {deletingId === t.id ? '...' : 'удалить'}
                 </button>
               </div>
@@ -122,11 +104,9 @@ export default function TemplatesPage() {
       )}
 
       {templates.length > 0 && (
-        <button
-          onClick={handleAdd}
-          className="fixed bottom-10 left-1/2 -translate-x-1/2 w-14 h-14 rounded-full flex items-center justify-center text-white text-3xl shadow-lg active:scale-95 transition-transform"
-          style={{ background: 'var(--accent-blue)' }}
-        >
+        <button onClick={handleAdd}
+                className="fixed bottom-10 left-1/2 -translate-x-1/2 w-14 h-14 rounded-full flex items-center justify-center text-white text-3xl shadow-lg active:scale-95 transition-transform"
+                style={{ background: 'var(--accent-blue)' }}>
           +
         </button>
       )}
