@@ -19,31 +19,41 @@ export default function TemplatesPage() {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [addLink, setAddLink] = useState('');
 
   useEffect(() => {
     if (!initData) return;
+    const enc = encodeURIComponent(initData);
 
-    fetch(`${API}/templates?initData=${encodeURIComponent(initData)}`)
-      .then(r => r.json())
-      .then(data => setTemplates(data.templates || []))
+    Promise.all([
+      fetch(`${API}/templates?initData=${enc}`).then(r => r.json()),
+      fetch(`${API}/channels/add-link?initData=${enc}`).then(r => r.json()),
+    ])
+      .then(([tmpl, lnk]) => {
+        setTemplates(tmpl.templates ?? []);
+        // Строим ссылку для создания поста — start=add_post
+        if (lnk.link) {
+          // lnk.link = https://t.me/BOTNAME?startchannel=...
+          // Нам нужно: https://t.me/BOTNAME?start=add_post
+          const botUsername = lnk.link.split('t.me/')[1]?.split('?')[0];
+          if (botUsername) setAddLink(`https://t.me/${botUsername}?start=add_post`);
+        }
+      })
       .catch(console.error)
       .finally(() => setIsLoading(false));
   }, [initData]);
 
-  // Перебрасываем в бота для создания шаблона
   const handleAdd = () => {
     haptic?.impactOccurred('medium');
-    const botUsername = process.env.NEXT_PUBLIC_BOT_USERNAME;
-    window.Telegram?.WebApp?.openTelegramLink(
-      `https://t.me/${botUsername}?start=add_post`
-    );
+    if (addLink) {
+      window.Telegram?.WebApp?.openTelegramLink(addLink);
+    }
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Удалить шаблон?')) return;
+    if (!window.confirm('Удалить шаблон?')) return;
     haptic?.impactOccurred('medium');
     setDeletingId(id);
-
     try {
       const res = await fetch(
         `${API}/templates/${id}?initData=${encodeURIComponent(initData)}`,
@@ -79,8 +89,8 @@ export default function TemplatesPage() {
           <span className="text-5xl">📝</span>
           <p style={{ color: 'var(--text-secondary)' }}>Шаблонов пока нет</p>
           <p className="text-sm text-center" style={{ color: 'var(--text-secondary)' }}>
-            Шаблон — это текст и картинка поста о розыгрыше.<br />
-            Создаётся через бота.
+            Шаблон — это текст поста о розыгрыше.<br />
+            Создаётся через бота — можно с фото или видео.
           </p>
           <button
             onClick={handleAdd}
@@ -91,7 +101,7 @@ export default function TemplatesPage() {
           </button>
         </div>
       ) : (
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3 pb-24">
           {templates.map(t => (
             <div key={t.id} className="glass-card p-4 rounded-xl">
               <div className="flex items-start justify-between gap-3">
@@ -99,8 +109,8 @@ export default function TemplatesPage() {
                   <span className="text-2xl shrink-0">{mediaIcon(t.media_type)}</span>
                   <div className="flex-1 min-w-0">
                     <p
-                      className="text-[14px] leading-5 wrap-break-word"
-                      style={{ color: 'var(--text-primary)' }}
+                      className="text-[14px] leading-5"
+                      style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}
                     >
                       {t.preview}
                     </p>
@@ -109,7 +119,6 @@ export default function TemplatesPage() {
                     </p>
                   </div>
                 </div>
-
                 <button
                   onClick={() => handleDelete(t.id)}
                   disabled={deletingId === t.id}
@@ -124,11 +133,10 @@ export default function TemplatesPage() {
         </div>
       )}
 
-      {/* FAB */}
       {templates.length > 0 && (
         <button
           onClick={handleAdd}
-          className="fixed bottom-10 left-1/2 -translate-x-1/2 w-14 h-14 rounded-full flex items-center justify-center text-white text-3xl shadow-lg"
+          className="fixed bottom-10 left-1/2 -translate-x-1/2 w-14 h-14 rounded-full flex items-center justify-center text-white text-3xl shadow-lg active:scale-95 transition-transform"
           style={{ background: 'var(--accent-blue)' }}
         >
           +

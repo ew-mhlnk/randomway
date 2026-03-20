@@ -12,39 +12,40 @@ interface TelegramUser {
 interface TelegramContextType {
   user: TelegramUser | null;
   initData: string;
-  haptic: WebApp['HapticFeedback'] | null;
+  haptic: TelegramHaptic | null;
   isLoading: boolean;
-  isReady: boolean;
 }
 
-// Минимальная типизация Telegram WebApp
-interface WebApp {
+interface TelegramHaptic {
+  impactOccurred: (style: 'light' | 'medium' | 'heavy' | 'rigid' | 'soft') => void;
+  notificationOccurred: (type: 'error' | 'success' | 'warning') => void;
+  selectionChanged: () => void;
+}
+
+// Полная типизация WebApp — включает все методы актуального API
+interface TelegramWebApp {
   ready: () => void;
   expand: () => void;
+  isFullscreen: boolean;
+  exitFullscreen: () => void;
+  requestFullscreen: () => void;
   initData: string;
   initDataUnsafe: { user?: TelegramUser };
   colorScheme: 'light' | 'dark';
-  // Открыть ссылку внутри Telegram (не браузер)
   openTelegramLink: (url: string) => void;
-  // Открыть внешнюю ссылку в браузере
   openLink: (url: string) => void;
-  HapticFeedback: {
-    impactOccurred: (style: 'light' | 'medium' | 'heavy' | 'rigid' | 'soft') => void;
-    notificationOccurred: (type: 'error' | 'success' | 'warning') => void;
-    selectionChanged: () => void;
-  };
+  HapticFeedback: TelegramHaptic;
   BackButton: {
     show: () => void;
     hide: () => void;
     onClick: (cb: () => void) => void;
     offClick: (cb: () => void) => void;
   };
-  // НЕ вызываем requestFullscreen — не хотим полный экран
 }
 
 declare global {
   interface Window {
-    Telegram?: { WebApp: WebApp };
+    Telegram?: { WebApp: TelegramWebApp };
   }
 }
 
@@ -53,48 +54,46 @@ const TelegramContext = createContext<TelegramContextType>({
   initData: '',
   haptic: null,
   isLoading: true,
-  isReady: false,
 });
 
 export function TelegramProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<TelegramUser | null>(null);
   const [initData, setInitData] = useState('');
-  const [haptic, setHaptic] = useState<WebApp['HapticFeedback'] | null>(null);
+  const [haptic, setHaptic] = useState<TelegramHaptic | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
     const tg = window.Telegram?.WebApp;
 
     if (!tg) {
-      // Режим разработки — нет Telegram, просто снимаем loading
+      // Локальная разработка без Telegram
       setIsLoading(false);
       return;
     }
 
-    // 1. Сообщаем Telegram что приложение готово (убирает лоадер "доступ запрещён")
+    // ready() уже вызван в layout.tsx (inline script) — не дублируем.
+    // Но на случай если layout не отработал — вызываем ещё раз (безопасно).
     tg.ready();
-
-    // 2. expand() — растянуть на всю высоту, но НЕ requestFullscreen
-    //    expand() просто убирает серый фон снизу, полный экран не включает
     tg.expand();
 
-    // 3. Читаем данные
-    const tgUser = tg.initDataUnsafe?.user;
-    if (tgUser) {
-      setUser(tgUser);
+    // Гарантированно выходим из fullscreen если он включён
+    if (tg.isFullscreen) {
+      tg.exitFullscreen();
     }
+
+    // Тема
+    document.documentElement.classList.toggle('dark', tg.colorScheme === 'dark');
+
+    // Данные пользователя
+    const tgUser = tg.initDataUnsafe?.user;
+    if (tgUser) setUser(tgUser);
 
     setInitData(tg.initData);
     setHaptic(tg.HapticFeedback);
-    setIsReady(true);
     setIsLoading(false);
-
-    // 4. Тема — применяем класс dark/light к <html>
-    document.documentElement.classList.toggle('dark', tg.colorScheme === 'dark');
   }, []);
 
-  // 5. Авторизуем пользователя на бэкенде как только получили initData
+  // Авторизация на бэкенде
   useEffect(() => {
     if (!initData) return;
 
@@ -102,14 +101,11 @@ export function TelegramProvider({ children }: { children: ReactNode }) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ initData }),
-    }).catch(() => {
-      // Тихая ошибка — пользователь продолжает пользоваться приложением
-      console.warn('Auth request failed');
-    });
+    }).catch(() => console.warn('Auth failed'));
   }, [initData]);
 
   return (
-    <TelegramContext.Provider value={{ user, initData, haptic, isLoading, isReady }}>
+    <TelegramContext.Provider value={{ user, initData, haptic, isLoading }}>
       {children}
     </TelegramContext.Provider>
   );
