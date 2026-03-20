@@ -12,51 +12,38 @@ from models import PostTemplate
 router = Router()
 MINI_APP_URL = os.getenv("MINI_APP_URL", "https://randomway.pro/")
 
-MAX_TEXT_ONLY = 4096
-MAX_WITH_MEDIA = 1024
+MAX_TEXT = 4096
+MAX_MEDIA = 1024
 
 
 class PostStates(StatesGroup):
     waiting_for_post = State()
 
 
-def _mini_app_kb(text: str = "🎲 Открыть приложение") -> InlineKeyboardMarkup:
+def _back_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text=text, web_app=WebAppInfo(url=MINI_APP_URL))
+        InlineKeyboardButton(text="🎲 Вернуться в приложение", web_app=WebAppInfo(url=MINI_APP_URL))
     ]])
 
 
-async def _show_prompt(message: Message, state: FSMContext):
+# ── /start add_post — приходит из Mini App ────────────────────────────────────
+
+@router.message(CommandStart(deep_link=True), F.text.contains("add_post"))
+async def start_add_post(message: Message, state: FSMContext):
     await state.set_state(PostStates.waiting_for_post)
     await message.answer(
-        "💬 <b>Создание шаблона поста</b>\n\n"
-        "Отправьте текст вашего поста.\n"
-        "✨ Можно прислать текст с картинкой, видео или GIF.\n\n"
+        "💬 Отправьте мне текст вашего поста.\n"
+        "✨ Вы можете прислать текст с картинкой или видео.\n\n"
         f"📏 Максимум символов:\n"
-        f"• Только текст: <b>{MAX_TEXT_ONLY:,}</b>\n"
-        f"• С медиафайлом: <b>{MAX_WITH_MEDIA:,}</b>\n\n"
+        f"• Только текст: <b>{MAX_TEXT:,}</b>\n"
+        f"• С медиафайлом: <b>{MAX_MEDIA:,}</b>\n\n"
         "🔥 Бот поддерживает кастомные эмодзи!\n\n"
         "Для отмены 👉 /cancel",
         parse_mode="HTML",
     )
 
 
-# ── Команды входа в режим создания поста ──────────────────────────────────────
-
-# Прямая команда /newpost — работает всегда (мобильный, десктоп)
-@router.message(Command("newpost"))
-async def cmd_newpost(message: Message, state: FSMContext):
-    await _show_prompt(message, state)
-
-
-# Deep link ?start=add_post — из Mini App кнопки
-# F.text.contains("add_post") не конфликтует с channels.py (тот ловит add_channel)
-@router.message(CommandStart(deep_link=True), F.text.contains("add_post"))
-async def deep_add_post(message: Message, state: FSMContext):
-    await _show_prompt(message, state)
-
-
-# ── Приём поста ───────────────────────────────────────────────────────────────
+# ── Приём поста от пользователя ───────────────────────────────────────────────
 
 @router.message(PostStates.waiting_for_post)
 async def receive_post(message: Message, state: FSMContext):
@@ -74,13 +61,12 @@ async def receive_post(message: Message, state: FSMContext):
         media_id = message.animation.file_id
         media_type = "animation"
 
-    # Проверка лимита
-    limit = MAX_WITH_MEDIA if media_id else MAX_TEXT_ONLY
+    limit = MAX_MEDIA if media_id else MAX_TEXT
     if len(text) > limit:
         await message.answer(
-            f"❌ Текст слишком длинный: <b>{len(text)}</b> символов.\n"
-            f"Лимит {'с медиафайлом' if media_id else 'без медиа'}: <b>{limit:,}</b>.\n\n"
-            "Сократите текст и отправьте снова.",
+            f"❌ Текст слишком длинный: <b>{len(text)}</b> симв.\n"
+            f"Лимит {'с медиа' if media_id else 'без медиа'}: <b>{limit:,}</b>.\n\n"
+            "Сократите и отправьте снова.",
             parse_mode="HTML",
         )
         return
@@ -107,7 +93,7 @@ async def receive_post(message: Message, state: FSMContext):
         f"🎉 Пост создан и сохранён!\n\n"
         f"{label} · {len(text)} симв.\n\n"
         "Вернитесь в приложение 👇",
-        reply_markup=_mini_app_kb("🎲 Вернуться к розыгрышу"),
+        reply_markup=_back_kb(),
         parse_mode="HTML",
     )
 
@@ -117,4 +103,4 @@ async def receive_post(message: Message, state: FSMContext):
 @router.message(Command("cancel"), PostStates.waiting_for_post)
 async def cancel_post(message: Message, state: FSMContext):
     await state.clear()
-    await message.answer("❌ Создание поста отменено.", reply_markup=_mini_app_kb())
+    await message.answer("❌ Отменено.", reply_markup=_back_kb())
