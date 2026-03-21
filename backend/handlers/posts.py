@@ -21,12 +21,13 @@ class PostStates(StatesGroup):
 
 
 def _back_kb() -> InlineKeyboardMarkup:
+    """Кнопка возврата в мини-апп"""
     return InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="🎲 Вернуться в приложение", web_app=WebAppInfo(url=MINI_APP_URL))
     ]])
 
 
-# ── Ловим Deep Link редирект из Mini App ──────────────────────────────────────
+# ── 1. Юзер пришел из Мини-Аппа по ссылке ?start=add_post ─────────────────────
 
 @router.message(CommandStart(deep_link=True, magic=F.args == "add_post"))
 async def cmd_add_post_deep_link(message: Message, state: FSMContext):
@@ -39,15 +40,7 @@ async def cmd_add_post_deep_link(message: Message, state: FSMContext):
     )
 
 
-# ── Кнопка «💬 Создать пост» (через меню) ─────────────────────────────────────
-
-@router.message(F.text == "💬 Создать пост")
-async def btn_create_post(message: Message, state: FSMContext):
-    # Вызываем ту же самую функцию
-    await cmd_add_post_deep_link(message, state)
-
-
-# ── Приём поста ───────────────────────────────────────────────────────────────
+# ── 2. Приём поста ────────────────────────────────────────────────────────────
 
 @router.message(PostStates.waiting_for_post)
 async def receive_post(message: Message, state: FSMContext):
@@ -67,7 +60,10 @@ async def receive_post(message: Message, state: FSMContext):
 
     limit = MAX_MEDIA if media_id else MAX_TEXT
     if len(text) > limit:
-        await message.answer(f"❌ Текст слишком длинный: <b>{len(text)}</b> симв. (Лимит: {limit})\nСократите и отправьте снова.")
+        await message.answer(
+            f"❌ Текст слишком длинный: <b>{len(text)}</b> симв. (Лимит: {limit})\n"
+            "Сократите и отправьте снова."
+        )
         return
 
     if not text and not media_id:
@@ -84,13 +80,22 @@ async def receive_post(message: Message, state: FSMContext):
         await db.commit()
 
     await state.clear()
+
+    label = {"photo": "📸 Фото", "video": "🎥 Видео", "animation": "🎞 GIF"}.get(
+        media_type, "📝 Текст"
+    )
+    
     await message.answer(
-        f"✅ Пост успешно сохранён!\n\nВернитесь в приложение 👇",
+        f"✅ Пост успешно сохранён!\n\n"
+        f"{label} · {len(text)} симв.\n\n"
+        "Вернитесь в приложение 👇",
         reply_markup=_back_kb()
     )
 
 
+# ── Отмена ────────────────────────────────────────────────────────────────────
+
 @router.message(Command("cancel"), PostStates.waiting_for_post)
 async def cancel_post(message: Message, state: FSMContext):
     await state.clear()
-    await message.answer("❌ Отменено.", reply_markup=_back_kb())
+    await message.answer("❌ Создание поста отменено.", reply_markup=_back_kb())
