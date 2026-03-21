@@ -16,40 +16,33 @@ interface Template {
 }
 
 export default function TemplatesPage() {
-  const { initData, haptic }      = useTelegram();
-  const [templates, setTemplates] = useState<Template[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const { initData, haptic }        = useTelegram();
+  const [templates, setTemplates]   = useState<Template[]>([]);
+  const [isLoading, setIsLoading]   = useState(true);
   const [deletingId, setDeletingId] = useState<number | null>(null);
-  const [isAdding, setIsAdding]   = useState(false);
+  const [isAdding, setIsAdding]     = useState(false);
 
   useEffect(() => {
     if (!initData) return;
-    fetch(`${API}/templates`, {
-      headers: { Authorization: `Bearer ${initData}` },
-    })
+    fetch(`${API}/templates`, { headers: { Authorization: `Bearer ${initData}` } })
       .then(r => r.json())
       .then(d => setTemplates(d.templates ?? []))
       .catch(console.error)
       .finally(() => setIsLoading(false));
   }, [initData]);
 
-  // ─── Создать пост ─────────────────────────────────────────────────────────
-  // Та же логика что и с каналами — бот шлёт сообщение, Mini App закрывается.
-
-  const handleAdd = async () => {
+  const handleAdd = () => {
     const tg = window.Telegram?.WebApp;
-    if (!tg || !initData || isAdding) return;
+    if (!tg || !initData) return;
 
     haptic?.impactOccurred('medium');
 
     tg.showPopup(
       {
-        title: '',
-        message:
-          'Приложение закроется, данные будут сохранены. Вы сможете продолжить с этого места.',
+        message: 'Приложение закроется. Бот попросит отправить текст поста — после сохранения вернитесь сюда.',
         buttons: [
-          { id: 'cancel', type: 'cancel', text: 'Отмена' },
-          { id: 'ok', type: 'default', text: 'ОК' },
+          { id: 'cancel', type: 'cancel',  text: 'Отмена' },
+          { id: 'ok',     type: 'default', text: 'ОК' },
         ],
       },
       async (buttonId: string) => {
@@ -57,12 +50,17 @@ export default function TemplatesPage() {
 
         setIsAdding(true);
         try {
-          await fetch(`${API}/bot/request-post`, {
+          const res = await fetch(`${API}/bot/request-post`, {
             method: 'POST',
             headers: { Authorization: `Bearer ${initData}` },
           });
+          if (!res.ok) {
+            const err = await res.json();
+            tg.showAlert(`Ошибка: ${err.detail ?? 'попробуйте ещё раз'}`);
+            return;
+          }
         } catch (e) {
-          console.error('request-post failed', e);
+          console.error(e);
         } finally {
           setIsAdding(false);
         }
@@ -72,9 +70,7 @@ export default function TemplatesPage() {
     );
   };
 
-  // ─── Удалить шаблон ───────────────────────────────────────────────────────
-
-  const handleDelete = async (id: number) => {
+  const handleDelete = (id: number) => {
     const tg = window.Telegram?.WebApp;
     if (!tg) return;
 
@@ -82,7 +78,7 @@ export default function TemplatesPage() {
       {
         message: 'Удалить этот шаблон?',
         buttons: [
-          { id: 'cancel', type: 'cancel', text: 'Отмена' },
+          { id: 'cancel', type: 'cancel',     text: 'Отмена' },
           { id: 'delete', type: 'destructive', text: 'Удалить' },
         ],
       },
@@ -111,17 +107,12 @@ export default function TemplatesPage() {
   return (
     <main className="min-h-screen p-4 pt-6 flex flex-col">
       <NativeBackButton />
-      <h1
-        className="text-2xl font-medium text-center mb-6"
-        style={{ color: 'var(--text-primary)' }}
-      >
+      <h1 className="text-2xl font-medium text-center mb-6" style={{ color: 'var(--text-primary)' }}>
         Шаблоны постов
       </h1>
 
       {isLoading ? (
-        <p className="text-center mt-10" style={{ color: 'var(--text-secondary)' }}>
-          Загрузка...
-        </p>
+        <p className="text-center mt-10" style={{ color: 'var(--text-secondary)' }}>Загрузка...</p>
       ) : templates.length === 0 ? (
         <div className="flex flex-col items-center gap-4 mt-10 text-center">
           <span className="text-5xl">📝</span>
@@ -132,7 +123,7 @@ export default function TemplatesPage() {
             className="px-6 py-3 rounded-xl text-white font-medium disabled:opacity-50"
             style={{ background: 'var(--accent-blue)' }}
           >
-            {isAdding ? 'Отправляем...' : 'Создать пост'}
+            {isAdding ? 'Подождите...' : 'Создать пост'}
           </button>
         </div>
       ) : (
@@ -142,10 +133,8 @@ export default function TemplatesPage() {
               <div className="flex items-start gap-3">
                 <span className="text-2xl shrink-0">{icon(t.media_type)}</span>
                 <div className="flex-1 min-w-0">
-                  <p
-                    className="text-[14px] leading-5"
-                    style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}
-                  >
+                  <p className="text-[14px] leading-5"
+                     style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>
                     {t.preview}
                   </p>
                   <p className="text-[12px] mt-1" style={{ color: 'var(--text-secondary)' }}>
@@ -156,9 +145,7 @@ export default function TemplatesPage() {
                   onClick={() => handleDelete(t.id)}
                   disabled={deletingId === t.id}
                   className="shrink-0 text-[13px] px-3 py-1"
-                  style={{
-                    color: deletingId === t.id ? 'var(--text-secondary)' : '#E74C3C',
-                  }}
+                  style={{ color: deletingId === t.id ? 'var(--text-secondary)' : '#E74C3C' }}
                 >
                   {deletingId === t.id ? '...' : 'удалить'}
                 </button>

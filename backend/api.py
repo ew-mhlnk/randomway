@@ -17,6 +17,7 @@ from aiogram.types import (
     ReplyKeyboardMarkup, KeyboardButton, KeyboardButtonRequestChat,
     ChatAdministratorRights,
 )
+from aiogram.fsm.storage.base import StorageKey
 
 from database import get_db
 from models import User, Channel, PostTemplate
@@ -65,19 +66,7 @@ def fmt(count: int | None) -> str:
     return str(count)
 
 
-# ── Pydantic models ───────────────────────────────────────────────────────────
-
-class AuthRequest(BaseModel):
-    initData: str
-
-class GiveawayCreateRequest(BaseModel):
-    title: str
-    type: str
-    template_id: str
-    winners_count: int
-
-
-# ── Keyboard builders (те же что в handlers/channels.py) ─────────────────────
+# ── Keyboard builders ─────────────────────────────────────────────────────────
 
 def _back_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
@@ -89,6 +78,7 @@ def _back_kb() -> InlineKeyboardMarkup:
 
 
 def _request_chat_kb() -> ReplyKeyboardMarkup:
+    """Reply-клавиатура с нативным пикером каналов/групп Telegram."""
     channel_rights = ChatAdministratorRights(
         is_anonymous=False, can_manage_chat=True, can_post_messages=True,
         can_edit_messages=True, can_delete_messages=True,
@@ -125,6 +115,18 @@ def _request_chat_kb() -> ReplyKeyboardMarkup:
     )
 
 
+# ── Pydantic models ───────────────────────────────────────────────────────────
+
+class AuthRequest(BaseModel):
+    initData: str
+
+class GiveawayCreateRequest(BaseModel):
+    title: str
+    type: str
+    template_id: str
+    winners_count: int
+
+
 # ── Bot Info ──────────────────────────────────────────────────────────────────
 
 @router.get("/bot-info")
@@ -143,8 +145,8 @@ async def authenticate_user(request: AuthRequest, db: AsyncSession = Depends(get
     if not user_data:
         raise HTTPException(status_code=401, detail="Неверная подпись Telegram")
 
-    tg_id  = user_data.get("id")
-    result = await db.execute(select(User).where(User.telegram_id == tg_id))
+    tg_id   = user_data.get("id")
+    result  = await db.execute(select(User).where(User.telegram_id == tg_id))
     db_user = result.scalar_one_or_none()
 
     if db_user:
@@ -162,25 +164,31 @@ async def authenticate_user(request: AuthRequest, db: AsyncSession = Depends(get
     return {"status": "success", "user": user_data}
 
 
-# ── Bot triggers: бот шлёт сообщение пользователю, мини-апп закрывается ──────
+# ── Bot triggers ──────────────────────────────────────────────────────────────
 #
-# Это единственный надёжный способ запустить flow из Mini App:
-#   1. Mini App вызывает этот endpoint (авторизован через initData)
-#   2. Бот шлёт пользователю сообщение с нужной клавиатурой / инструкцией
-#   3. Фронтенд вызывает tg.close() — Mini App закрывается
-#   4. Пользователь видит сообщение бота уже в чате
+# Единственный надёжный способ запустить бот-flow из Mini App:
 #
-# Почему НЕ deep link t.me/BOT?start=X:
-#   start= срабатывает ТОЛЬКО при первом старте бота.
-#   Если бот уже запущен — Telegram просто откроет чат молча, без команды.
+#   1. Mini App делает POST на /bot/request-channel (или /bot/request-post)
+#   2. Бэкенд через bot.send_message() шлёт пользователю сообщение
+#   3. КРИТИЧНО: устанавливаем FSM-состояние через dp.storage напрямую,
+#      чтобы бот знал что ожидать от следующего сообщения пользователя
+#   4. Mini App вызывает tg.close() — пользователь видит сообщение бота
+#
+# Почему НЕ /start?start=newchannel:
+#   ?start= срабатывает ТОЛЬКО при первом запуске бота.
+#   Если бот уже запущен — Telegram открывает чат молча, команда не отправляется.
 
 @router.post("/bot/request-channel")
 async def bot_request_channel(request: Request, user_id: int = Depends(get_user_id)):
     """
-    Бот шлёт пользователю инструкцию + кнопки выбора канала/группы.
-    Mini App после этого вызывает tg.close().
+    Бот шлёт инструкцию + кнопки пикера. Устанавливает FSM waiting_for_channel.
     """
     bot = request.app.state.bot
+    dp  = request.app.state.dp
+
+    # Импортируем состояние здесь, чтобы избежать circular import
+    from handlers.channels import ChannelStates
+
     try:
         await bot.send_message(
             chat_id=user_id,
@@ -190,23 +198,32 @@ async def bot_request_channel(request: Request, user_id: int = Depends(get_user_
                 "⚠️ Бот должен быть администратором канала с правами на публикацию "
                 "и редактирование сообщений.\n\n"
                 "Для отмены — /cancel\n\n"
-                "🔥 Или нажмите кнопку ниже — Telegram сам откроет список ваших "
-                "каналов и автоматически добавит бота с нужными правами 👇"
+                "🔥 Или нажмите кнопку ниже — Telegram откроет список ваших каналов "
+                "и автоматически добавит бота с нужными правами 👇"
             ),
             reply_markup=_request_chat_kb(),
         )
-        return {"status": "ok"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Не удалось отправить сообщение: {e}")
+        raise HTTPException(status_code=500, detail=f"send_message failed: {e}")
+
+    # Устанавливаем FSM-состояние: теперь бот ждёт канал от этого пользователя
+    bot_id = (await bot.get_me()).id
+    key = StorageKey(bot_id=bot_id, chat_id=user_id, user_id=user_id)
+    await dp.storage.set_state(key=key, state=ChannelStates.waiting_for_channel)
+
+    return {"status": "ok"}
 
 
 @router.post("/bot/request-post")
 async def bot_request_post(request: Request, user_id: int = Depends(get_user_id)):
     """
-    Бот шлёт пользователю инструкцию по созданию поста.
-    Mini App после этого вызывает tg.close().
+    Бот шлёт инструкцию по созданию поста. Устанавливает FSM waiting_for_post.
     """
     bot = request.app.state.bot
+    dp  = request.app.state.dp
+
+    from handlers.posts import PostStates
+
     try:
         await bot.send_message(
             chat_id=user_id,
@@ -218,9 +235,14 @@ async def bot_request_post(request: Request, user_id: int = Depends(get_user_id)
                 "Для отмены — /cancel"
             ),
         )
-        return {"status": "ok"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Не удалось отправить сообщение: {e}")
+        raise HTTPException(status_code=500, detail=f"send_message failed: {e}")
+
+    bot_id = (await bot.get_me()).id
+    key = StorageKey(bot_id=bot_id, chat_id=user_id, user_id=user_id)
+    await dp.storage.set_state(key=key, state=PostStates.waiting_for_post)
+
+    return {"status": "ok"}
 
 
 # ── Channels ──────────────────────────────────────────────────────────────────
@@ -249,7 +271,7 @@ async def channel_photo(channel_id: int, initData: str, db: AsyncSession = Depen
     )
     channel = result.scalar_one_or_none()
     if not channel or not channel.photo_file_id:
-        raise HTTPException(status_code=404, detail="Фото не найдено")
+        raise HTTPException(status_code=404)
 
     import aiohttp
     async with aiohttp.ClientSession() as session:
@@ -260,7 +282,6 @@ async def channel_photo(channel_id: int, initData: str, db: AsyncSession = Depen
             if not data.get("ok"):
                 raise HTTPException(status_code=404)
             file_path = data["result"]["file_path"]
-
         async with session.get(
             f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}"
         ) as r:
@@ -282,7 +303,7 @@ async def delete_channel(
     )
     ch = result.scalar_one_or_none()
     if not ch:
-        raise HTTPException(status_code=404, detail="Канал не найден")
+        raise HTTPException(status_code=404)
 
     bot = request.app.state.bot
     try:
@@ -290,7 +311,7 @@ async def delete_channel(
     except TelegramBadRequest:
         pass
     except Exception as e:
-        print(f"Failed to leave chat: {e}")
+        print(f"leave_chat failed: {e}")
 
     await db.delete(ch)
     await db.commit()
