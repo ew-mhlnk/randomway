@@ -1,5 +1,3 @@
-// frontend\app\templates\page.tsx
-
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -17,16 +15,15 @@ interface Template {
 
 export default function TemplatesPage() {
   const { initData, haptic }        = useTelegram();
-  const [templates, setTemplates]   = useState<Template[]>([]);
+  const[templates, setTemplates]   = useState<Template[]>([]);
   const [isLoading, setIsLoading]   = useState(true);
-  const [deletingId, setDeletingId] = useState<number | null>(null);
-  const [isAdding, setIsAdding]     = useState(false);
+  const [actionId, setActionId]     = useState<number | null>(null);
 
   useEffect(() => {
     if (!initData) return;
     fetch(`${API}/templates`, { headers: { Authorization: `Bearer ${initData}` } })
       .then(r => r.json())
-      .then(d => setTemplates(d.templates ?? []))
+      .then(d => setTemplates(d.templates ??[]))
       .catch(console.error)
       .finally(() => setIsLoading(false));
   }, [initData]);
@@ -34,38 +31,36 @@ export default function TemplatesPage() {
   const handleAdd = () => {
     const tg = window.Telegram?.WebApp;
     if (!tg || !initData) return;
-
     haptic?.impactOccurred('medium');
 
-    tg.showPopup(
-      {
+    tg.showPopup({
         message: 'Приложение закроется. Бот попросит отправить текст поста — после сохранения вернитесь сюда.',
-        buttons: [
-          { id: 'cancel', type: 'cancel',  text: 'Отмена' },
-          { id: 'ok',     type: 'default', text: 'ОК' },
-        ],
-      },
-      async (buttonId: string) => {
+        buttons:[{ id: 'cancel', type: 'cancel',  text: 'Отмена' }, { id: 'ok', type: 'default', text: 'ОК' }],
+      }, async (buttonId: string) => {
         if (buttonId !== 'ok') return;
-
-        setIsAdding(true);
         try {
-          const res = await fetch(`${API}/bot/request-post`, {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${initData}` },
-          });
-          if (!res.ok) {
-            const err = await res.json();
-            tg.showAlert(`Ошибка: ${err.detail ?? 'попробуйте ещё раз'}`);
-            return;
-          }
-        } catch (e) {
-          console.error(e);
-        } finally {
-          setIsAdding(false);
-        }
+          await fetch(`${API}/bot/request-post`, { method: 'POST', headers: { Authorization: `Bearer ${initData}` } });
+          tg.close();
+        } catch (e) {}
+      }
+    );
+  };
 
-        tg.close();
+  const handleEdit = (id: number) => {
+    const tg = window.Telegram?.WebApp;
+    if (!tg) return;
+    haptic?.impactOccurred('medium');
+
+    tg.showPopup({
+        message: 'Хотите изменить этот пост? Приложение закроется, и бот попросит прислать новый текст.',
+        buttons:[{ id: 'cancel', type: 'cancel', text: 'Отмена' }, { id: 'ok', type: 'default', text: 'Изменить' }],
+      }, async (buttonId: string) => {
+        if (buttonId !== 'ok') return;
+        setActionId(id);
+        try {
+          await fetch(`${API}/bot/request-post-edit/${id}`, { method: 'POST', headers: { Authorization: `Bearer ${initData}` }});
+          tg.close();
+        } finally { setActionId(null); }
       }
     );
   };
@@ -74,35 +69,22 @@ export default function TemplatesPage() {
     const tg = window.Telegram?.WebApp;
     if (!tg) return;
 
-    tg.showPopup(
-      {
+    tg.showPopup({
         message: 'Удалить этот шаблон?',
-        buttons: [
-          { id: 'cancel', type: 'cancel',     text: 'Отмена' },
-          { id: 'delete', type: 'destructive', text: 'Удалить' },
-        ],
-      },
-      async (buttonId: string) => {
+        buttons:[{ id: 'cancel', type: 'cancel', text: 'Отмена' }, { id: 'delete', type: 'destructive', text: 'Удалить' }],
+      }, async (buttonId: string) => {
         if (buttonId !== 'delete') return;
-        haptic?.impactOccurred('medium');
-        setDeletingId(id);
+        haptic?.impactOccurred('heavy');
+        setActionId(id);
         try {
-          await fetch(`${API}/templates/${id}`, {
-            method: 'DELETE',
-            headers: { Authorization: `Bearer ${initData}` },
-          });
+          await fetch(`${API}/templates/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${initData}` } });
           setTemplates(prev => prev.filter(t => t.id !== id));
-        } catch {
-          tg.showAlert('Не удалось удалить шаблон');
-        } finally {
-          setDeletingId(null);
-        }
+        } finally { setActionId(null); }
       }
     );
   };
 
-  const icon = (t: string | null) =>
-    ({ photo: '🖼', video: '🎥', animation: '🎞' }[t ?? ''] ?? '📝');
+  const icon = (t: string | null) => ({ photo: '📸', video: '🎥', animation: '🎞' }[t ?? ''] ?? '📝');
 
   return (
     <main className="min-h-screen p-4 pt-6 flex flex-col">
@@ -117,38 +99,36 @@ export default function TemplatesPage() {
         <div className="flex flex-col items-center gap-4 mt-10 text-center">
           <span className="text-5xl">📝</span>
           <p style={{ color: 'var(--text-secondary)' }}>Шаблонов пока нет</p>
-          <button
-            onClick={handleAdd}
-            disabled={isAdding}
-            className="px-6 py-3 rounded-xl text-white font-medium disabled:opacity-50"
-            style={{ background: 'var(--accent-blue)' }}
-          >
-            {isAdding ? 'Подождите...' : 'Создать пост'}
-          </button>
+          <button onClick={handleAdd} className="px-6 py-3 rounded-xl text-white font-medium" style={{ background: 'var(--accent-blue)' }}>Создать пост</button>
         </div>
       ) : (
         <div className="flex flex-col gap-3 pb-24">
           {templates.map(t => (
             <div key={t.id} className="glass-card p-4 rounded-xl">
-              <div className="flex items-start gap-3">
-                <span className="text-2xl shrink-0">{icon(t.media_type)}</span>
+              <div className="flex justify-between items-center mb-2 border-b border-white/5 pb-2">
+                <span className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>
+                  {icon(t.media_type)} Пост #{t.id}
+                </span>
+                <span className="text-xs px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-400 font-medium">
+                  Кнопка: «{t.button_text}»
+                </span>
+              </div>
+              
+              <div className="flex items-start gap-3 mt-3">
                 <div className="flex-1 min-w-0">
-                  <p className="text-[14px] leading-5"
-                     style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>
+                  <p className="text-[14px] leading-5 opacity-90" style={{ color: 'var(--text-primary)', wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>
                     {t.preview}
                   </p>
-                  <p className="text-[12px] mt-1" style={{ color: 'var(--text-secondary)' }}>
-                    Кнопка: «{t.button_text}»
-                  </p>
                 </div>
-                <button
-                  onClick={() => handleDelete(t.id)}
-                  disabled={deletingId === t.id}
-                  className="shrink-0 text-[13px] px-3 py-1"
-                  style={{ color: deletingId === t.id ? 'var(--text-secondary)' : '#E74C3C' }}
-                >
-                  {deletingId === t.id ? '...' : 'удалить'}
-                </button>
+                
+                <div className="flex flex-col gap-3 ml-2 shrink-0 border-l border-white/5 pl-3">
+                  <button onClick={() => handleEdit(t.id)} disabled={actionId === t.id} className="text-[12px] font-medium" style={{ color: 'var(--accent-blue)' }}>
+                    изменить
+                  </button>
+                  <button onClick={() => handleDelete(t.id)} disabled={actionId === t.id} className="text-[12px]" style={{ color: actionId === t.id ? 'var(--text-secondary)' : '#E74C3C' }}>
+                    удалить
+                  </button>
+                </div>
               </div>
             </div>
           ))}
@@ -156,14 +136,7 @@ export default function TemplatesPage() {
       )}
 
       {templates.length > 0 && (
-        <button
-          onClick={handleAdd}
-          disabled={isAdding}
-          className="fixed bottom-10 left-1/2 -translate-x-1/2 w-14 h-14 rounded-full flex items-center justify-center text-white text-3xl shadow-lg active:scale-95 transition-transform disabled:opacity-50"
-          style={{ background: 'var(--accent-blue)' }}
-        >
-          {isAdding ? '…' : '+'}
-        </button>
+        <button onClick={handleAdd} className="fixed bottom-10 left-1/2 -translate-x-1/2 w-14 h-14 rounded-full flex items-center justify-center text-white text-3xl shadow-lg active:scale-95 transition-transform" style={{ background: 'var(--accent-blue)' }}>+</button>
       )}
     </main>
   );

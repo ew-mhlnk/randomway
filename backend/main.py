@@ -1,3 +1,5 @@
+"""backend\main.py"""
+
 import logging
 import hashlib
 import uvicorn
@@ -17,7 +19,8 @@ from aiogram.types import (
     WebAppInfo, BotCommand, Update, ReplyKeyboardRemove
 )
 from aiogram.filters import CommandStart
-from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.storage.redis import RedisStorage
+from redis.asyncio import Redis
 
 from handlers.channels import router as channels_router
 from handlers.posts import router as posts_router
@@ -31,9 +34,8 @@ WEBHOOK_URL    = os.getenv("WEBHOOK_URL", "https://api.randomway.pro")
 WEBHOOK_PATH   = "/webhook"
 WEBHOOK_SECRET = hashlib.sha256(BOT_TOKEN.encode()).hexdigest()[:32]
 
-# Для production в будущем рекомендуется заменить MemoryStorage на RedisStorage,
-# чтобы стейты не сбрасывались при перезапуске контейнера.
-storage = MemoryStorage()
+redis_client = Redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"))
+storage = RedisStorage(redis=redis_client)
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp  = Dispatcher(storage=storage)
 
@@ -59,7 +61,6 @@ async def start_default(message: Message):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Кешируем bot_id и username при старте
     try:
         info = await bot.get_me()
         os.environ["BOT_USERNAME"] = info.username
@@ -99,6 +100,7 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
     await bot.session.close()
+    await redis_client.aclose()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -119,17 +121,15 @@ async def telegram_webhook(request: Request):
     secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
     if secret != WEBHOOK_SECRET:
         raise HTTPException(status_code=403, detail="Invalid secret")
-    
+
     update_data = await request.json()
     update = Update.model_validate(update_data)
-    
-    # 🔥 ГЛАВНЫЙ ФИКС СПАМА: Оборачиваем в try-except. 
-    # Теперь Telegram всегда будет получать "ok": True и не будет слать апдейты по кругу
+
     try:
         await dp.feed_update(bot, update)
     except Exception as e:
         logging.error(f"Ошибка при обработке апдейта {update.update_id}: {e}")
-        
+
     return JSONResponse({"ok": True})
 
 

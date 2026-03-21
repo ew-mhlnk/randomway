@@ -42,6 +42,7 @@ class Channel(Base):
     # Новые поля — заполняются когда бот добавляется в канал
     members_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     photo_file_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    photo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     owner = relationship("User", back_populates="channels")
 

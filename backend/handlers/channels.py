@@ -15,6 +15,7 @@ from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy.future import select
 from database import AsyncSessionLocal
 from models import Channel
+from services.s3_service import upload_tg_avatar_to_s3
 
 router = Router()
 MINI_APP_URL = os.getenv("MINI_APP_URL", "https://randomway.pro/")
@@ -35,43 +36,32 @@ def _back_kb() -> InlineKeyboardMarkup:
 
 
 def _request_chat_kb() -> ReplyKeyboardMarkup:
-    """
-    Генерирует нативное нижнее меню Telegram.
-    Добавлены ВСЕ обязательные поля, включая новые права на Истории (Stories), 
-    чтобы aiogram не выдавал ошибку валидации.
-    """
-    # Полный набор прав для Канала
     channel_rights = ChatAdministratorRights(
-        is_anonymous=False, 
-        can_manage_chat=True, 
+        is_anonymous=False,
+        can_manage_chat=True,
         can_post_messages=True,
-        can_edit_messages=True, 
+        can_edit_messages=True,
         can_delete_messages=True,
-        # Обязательные базовые поля (ставим False):
         can_manage_video_chats=False,
         can_restrict_members=False,
         can_promote_members=False,
         can_change_info=False,
         can_invite_users=False,
-        # Новые поля для Историй (из-за которых падала ошибка):
         can_post_stories=False,
         can_edit_stories=False,
         can_delete_stories=False
     )
-    
-    # Полный набор прав для Группы
+
     group_rights = ChatAdministratorRights(
-        is_anonymous=False, 
-        can_manage_chat=True, 
+        is_anonymous=False,
+        can_manage_chat=True,
         can_delete_messages=True,
         can_restrict_members=True,
-        can_invite_users=True, 
+        can_invite_users=True,
         can_pin_messages=True,
-        # Обязательные базовые поля (ставим False):
         can_manage_video_chats=False,
         can_promote_members=False,
         can_change_info=False,
-        # Новые поля для Историй (из-за которых падала ошибка):
         can_post_stories=False,
         can_edit_stories=False,
         can_delete_stories=False
@@ -82,7 +72,7 @@ def _request_chat_kb() -> ReplyKeyboardMarkup:
             KeyboardButton(
                 text="📁 Добавить канал",
                 request_chat=KeyboardButtonRequestChat(
-                    request_id=1, 
+                    request_id=1,
                     chat_is_channel=True,
                     user_administrator_rights=channel_rights,
                     bot_administrator_rights=channel_rights
@@ -91,7 +81,7 @@ def _request_chat_kb() -> ReplyKeyboardMarkup:
             KeyboardButton(
                 text="💬 Добавить группу",
                 request_chat=KeyboardButtonRequestChat(
-                    request_id=2, 
+                    request_id=2,
                     chat_is_channel=False,
                     user_administrator_rights=group_rights,
                     bot_administrator_rights=group_rights
@@ -106,7 +96,12 @@ def _request_chat_kb() -> ReplyKeyboardMarkup:
 async def _save_chat(chat_id: int, owner_id: int, bot: Bot) -> tuple[bool, str, int]:
     chat  = await bot.get_chat(chat_id)
     count = await bot.get_chat_member_count(chat_id)
-    photo = chat.photo.small_file_id if chat.photo else None
+    photo_id = chat.photo.small_file_id if chat.photo else None
+
+    # 🚀 Загружаем фото в Cloudflare R2
+    photo_url = None
+    if photo_id:
+        photo_url = await upload_tg_avatar_to_s3(photo_id, chat.id)
 
     async with AsyncSessionLocal() as db:
         existing = await db.scalar(select(Channel).where(Channel.telegram_id == chat.id))
@@ -114,7 +109,9 @@ async def _save_chat(chat_id: int, owner_id: int, bot: Bot) -> tuple[bool, str, 
             existing.title         = chat.title
             existing.username      = getattr(chat, "username", None)
             existing.members_count = count
-            existing.photo_file_id = photo
+            existing.photo_file_id = photo_id
+            if photo_url:
+                existing.photo_url = photo_url
             existing.is_active     = True
             existing.owner_id      = owner_id
             await db.commit()
@@ -123,7 +120,8 @@ async def _save_chat(chat_id: int, owner_id: int, bot: Bot) -> tuple[bool, str, 
         db.add(Channel(
             telegram_id=chat.id, owner_id=owner_id, title=chat.title,
             username=getattr(chat, "username", None),
-            members_count=count, photo_file_id=photo,
+            members_count=count, photo_file_id=photo_id,
+            photo_url=photo_url
         ))
         await db.commit()
         return True, chat.title, count
@@ -133,7 +131,7 @@ async def _save_chat(chat_id: int, owner_id: int, bot: Bot) -> tuple[bool, str, 
 @router.message(Command("newchannel"))
 async def cmd_new_channel(message: Message, state: FSMContext):
     await state.set_state(ChannelStates.waiting_for_channel)
-    
+
     text = (
         "💬 Пришлите <b>username</b> канала в формате @durov или перешлите сообщение "
         "из канала (например приватного), который вы хотите добавить.\n\n"
@@ -145,12 +143,11 @@ async def cmd_new_channel(message: Message, state: FSMContext):
     await message.answer(text, reply_markup=_request_chat_kb())
 
 
-# ── СРАБАТЫВАЕТ, КОГДА ЮЗЕР ВЫБРАЛ КАНАЛ В ОКНЕ ───────────────────────────────
+# ── СРАБАТЫВАЕТ, КОГДА ЮЗЕР ВЫБРАЛ КАНАЛ В ОКНЕ ─────────────────────────────
 @router.message(F.chat_shared)
 async def on_chat_shared(message: Message, bot: Bot, state: FSMContext):
     chat_id = message.chat_shared.chat_id
-    
-    # Убираем кнопки снизу экрана
+
     await message.answer("⏳ Проверяем права...", reply_markup=ReplyKeyboardRemove())
     await asyncio.sleep(0.5)
 
@@ -158,7 +155,7 @@ async def on_chat_shared(message: Message, bot: Bot, state: FSMContext):
         chat = await bot.get_chat(chat_id)
         is_new, title, count = await _save_chat(chat.id, message.from_user.id, bot)
         kind = "Канал" if chat.type == "channel" else "Группа"
-        
+
         await state.clear()
         await message.answer(
             f"🎉 {kind} <b>{title}</b> успешно добавлен!\n"
@@ -175,7 +172,7 @@ async def on_chat_shared(message: Message, bot: Bot, state: FSMContext):
         )
 
 
-# ── СРАБАТЫВАЕТ, ЕСЛИ ЮЗЕР СКИНУЛ @USERNAME ИЛИ ПЕРЕСЛАЛ СООБЩЕНИЕ ────────────
+# ── СРАБАТЫВАЕТ, ЕСЛИ ЮЗЕР СКИНУЛ @USERNAME ИЛИ ПЕРЕСЛАЛ СООБЩЕНИЕ ──────────
 @router.message(ChannelStates.waiting_for_channel)
 async def process_manual_channel(message: Message, state: FSMContext, bot: Bot):
     chat_id = None
@@ -214,7 +211,7 @@ async def process_manual_channel(message: Message, state: FSMContext, bot: Bot):
         logging.error(f"process_manual error: {e}")
         await message.answer(
             "❌ Бот не имеет доступа к этому каналу.\n"
-            "Попробуйте добавить через меню 👇", 
+            "Попробуйте добавить через меню 👇",
             reply_markup=_request_chat_kb()
         )
 

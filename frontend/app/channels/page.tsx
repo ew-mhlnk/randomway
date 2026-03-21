@@ -1,5 +1,3 @@
-// frontend\app\channels\page.tsx
-
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -14,15 +12,17 @@ interface Channel {
   username: string | null;
   members_formatted: string;
   has_photo: boolean;
+  photo_url?: string;
 }
 
-function Avatar({ channel, initData }: { channel: Channel; initData: string }) {
+function Avatar({ channel }: { channel: Channel }) {
   const [err, setErr] = useState(false);
   const colors = ['#1A8CFF', '#E020C0', '#2ECC71', '#E74C3C', '#F39C12'];
-  if (channel.has_photo && !err) {
+
+  if (channel.has_photo && channel.photo_url && !err) {
     return (
       <img
-        src={`${API}/channels/${channel.id}/photo?initData=${encodeURIComponent(initData)}`}
+        src={channel.photo_url}
         alt={channel.title}
         onError={() => setErr(true)}
         className="w-11 h-11 rounded-full object-cover shrink-0"
@@ -41,60 +41,58 @@ function Avatar({ channel, initData }: { channel: Channel; initData: string }) {
 
 export default function ChannelsPage() {
   const { initData, haptic } = useTelegram();
-  const [channels, setChannels]     = useState<Channel[]>([]);
-  const [isLoading, setIsLoading]   = useState(true);
-  const [deletingId, setDeletingId] = useState<number | null>(null);
-  const [isAdding, setIsAdding]     = useState(false);
+  const [channels, setChannels]   = useState<Channel[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [actionId, setActionId]   = useState<number | null>(null);
+  const [isAdding, setIsAdding]   = useState(false);
 
-  useEffect(() => {
-    if (!initData) return;
+  const fetchChannels = () => {
     fetch(`${API}/channels`, { headers: { Authorization: `Bearer ${initData}` } })
       .then(r => r.json())
       .then(d => setChannels(d.channels ?? []))
       .catch(console.error)
       .finally(() => setIsLoading(false));
+  };
+
+  useEffect(() => {
+    if (initData) fetchChannels();
   }, [initData]);
 
   const handleAdd = () => {
     const tg = window.Telegram?.WebApp;
     if (!tg || !initData) return;
-
     haptic?.impactOccurred('medium');
 
     tg.showPopup(
       {
         message: 'Приложение закроется. Бот пришлёт инструкцию — выберите канал и вернитесь сюда.',
-        buttons: [
-          { id: 'cancel', type: 'cancel', text: 'Отмена' },
-          { id: 'ok',     type: 'default', text: 'ОК' },
-        ],
+        buttons: [{ id: 'cancel', type: 'cancel', text: 'Отмена' }, { id: 'ok', type: 'default', text: 'ОК' }],
       },
       async (buttonId: string) => {
         if (buttonId !== 'ok') return;
-
         setIsAdding(true);
         try {
-          // Бот шлёт сообщение + устанавливает FSM waiting_for_channel
-          const res = await fetch(`${API}/bot/request-channel`, {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${initData}` },
-          });
-          if (!res.ok) {
-            const err = await res.json();
-            tg.showAlert(`Ошибка: ${err.detail ?? 'попробуйте ещё раз'}`);
-            return;
-          }
-        } catch (e) {
-          // Не блокируем — всё равно закрываем, пользователь может написать /newchannel
-          console.error(e);
-        } finally {
-          setIsAdding(false);
-        }
-
-        // Закрываем Mini App — пользователь увидит сообщение бота
+          await fetch(`${API}/bot/request-channel`, { method: 'POST', headers: { Authorization: `Bearer ${initData}` } });
+        } finally { setIsAdding(false); }
         tg.close();
       }
     );
+  };
+
+  const handleSync = async (id: number) => {
+    haptic?.impactOccurred('light');
+    setActionId(id);
+    try {
+      const res = await fetch(`${API}/channels/${id}/sync`, { method: 'POST', headers: { Authorization: `Bearer ${initData}` } });
+      if (res.ok) {
+        haptic?.notificationOccurred('success');
+        fetchChannels();
+      } else {
+        window.Telegram?.WebApp.showAlert('Ошибка: бот больше не администратор');
+      }
+    } finally {
+      setActionId(null);
+    }
   };
 
   const handleDelete = (id: number) => {
@@ -104,26 +102,16 @@ export default function ChannelsPage() {
     tg.showPopup(
       {
         message: 'Удалить этот канал? Бот автоматически выйдет из него.',
-        buttons: [
-          { id: 'cancel', type: 'cancel',      text: 'Отмена' },
-          { id: 'delete', type: 'destructive',  text: 'Удалить' },
-        ],
+        buttons: [{ id: 'cancel', type: 'cancel', text: 'Отмена' }, { id: 'delete', type: 'destructive', text: 'Удалить' }],
       },
       async (buttonId: string) => {
         if (buttonId !== 'delete') return;
         haptic?.impactOccurred('heavy');
-        setDeletingId(id);
+        setActionId(id);
         try {
-          await fetch(`${API}/channels/${id}`, {
-            method: 'DELETE',
-            headers: { Authorization: `Bearer ${initData}` },
-          });
+          await fetch(`${API}/channels/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${initData}` } });
           setChannels(prev => prev.filter(c => c.id !== id));
-        } catch {
-          tg.showAlert('Не удалось удалить канал');
-        } finally {
-          setDeletingId(null);
-        }
+        } finally { setActionId(null); }
       }
     );
   };
@@ -131,9 +119,7 @@ export default function ChannelsPage() {
   return (
     <main className="min-h-screen p-4 pt-6 flex flex-col">
       <NativeBackButton />
-      <h1 className="text-2xl font-medium text-center mb-6" style={{ color: 'var(--text-primary)' }}>
-        Каналы
-      </h1>
+      <h1 className="text-2xl font-medium text-center mb-6" style={{ color: 'var(--text-primary)' }}>Каналы</h1>
 
       {isLoading ? (
         <p className="text-center mt-10" style={{ color: 'var(--text-secondary)' }}>Загрузка...</p>
@@ -141,13 +127,8 @@ export default function ChannelsPage() {
         <div className="flex flex-col items-center gap-4 mt-10 text-center">
           <span className="text-5xl">🏛</span>
           <p style={{ color: 'var(--text-secondary)' }}>Каналов пока нет</p>
-          <button
-            onClick={handleAdd}
-            disabled={isAdding}
-            className="px-6 py-3 rounded-xl text-white font-medium disabled:opacity-50"
-            style={{ background: 'var(--accent-blue)' }}
-          >
-            {isAdding ? 'Подождите...' : 'Добавить канал'}
+          <button onClick={handleAdd} disabled={isAdding} className="px-6 py-3 rounded-xl text-white font-medium disabled:opacity-50" style={{ background: 'var(--accent-blue)' }}>
+            Добавить канал
           </button>
         </div>
       ) : (
@@ -155,38 +136,39 @@ export default function ChannelsPage() {
           {channels.map(ch => (
             <div key={ch.id} className="glass-card p-4 rounded-xl flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <Avatar channel={ch} initData={initData} />
+                <Avatar channel={ch} />
                 <div>
-                  <p className="font-medium text-[15px]" style={{ color: 'var(--text-primary)' }}>
-                    {ch.title}
-                  </p>
+                  <p className="font-medium text-[15px]" style={{ color: 'var(--text-primary)' }}>{ch.title}</p>
                   <p className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>
                     {ch.username ? `@${ch.username} · ` : ''}{ch.members_formatted} подписчиков
                   </p>
                 </div>
               </div>
-              <button
-                onClick={() => handleDelete(ch.id)}
-                disabled={deletingId === ch.id}
-                className="shrink-0 text-[13px] px-3 py-1"
-                style={{ color: deletingId === ch.id ? 'var(--text-secondary)' : '#E74C3C' }}
-              >
-                {deletingId === ch.id ? '...' : 'удалить'}
-              </button>
+              <div className="flex flex-col gap-1 items-end">
+                <button
+                  onClick={() => handleSync(ch.id)}
+                  disabled={actionId === ch.id}
+                  className="text-[12px] font-medium"
+                  style={{ color: 'var(--accent-blue)' }}
+                >
+                  обновить
+                </button>
+                <button
+                  onClick={() => handleDelete(ch.id)}
+                  disabled={actionId === ch.id}
+                  className="text-[12px]"
+                  style={{ color: actionId === ch.id ? 'var(--text-secondary)' : '#E74C3C' }}
+                >
+                  удалить
+                </button>
+              </div>
             </div>
           ))}
         </div>
       )}
 
       {channels.length > 0 && (
-        <button
-          onClick={handleAdd}
-          disabled={isAdding}
-          className="fixed bottom-10 left-1/2 -translate-x-1/2 w-14 h-14 rounded-full flex items-center justify-center text-white text-3xl shadow-lg active:scale-95 transition-transform disabled:opacity-50"
-          style={{ background: 'var(--accent-blue)' }}
-        >
-          {isAdding ? '…' : '+'}
-        </button>
+        <button onClick={handleAdd} disabled={isAdding} className="fixed bottom-10 left-1/2 -translate-x-1/2 w-14 h-14 rounded-full flex items-center justify-center text-white text-3xl shadow-lg active:scale-95 transition-transform" style={{ background: 'var(--accent-blue)' }}>+</button>
       )}
     </main>
   );
