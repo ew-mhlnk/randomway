@@ -1,3 +1,5 @@
+"""backend\services\giveaway_service.py"""
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException
 from repositories.giveaway_repo import giveaway_repo

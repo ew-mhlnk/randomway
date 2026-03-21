@@ -1,3 +1,5 @@
+# backend\requirements.txt
+
 aiogram>=3.13.0
 fastapi>=0.115.0
 uvicorn>=0.30.0

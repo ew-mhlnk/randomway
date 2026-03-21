@@ -1,3 +1,5 @@
+# frontend\Dockerfile
+
 # Этап 1: Установка зависимостей
 FROM node:20-alpine AS deps
 RUN apk add --no-cache libc6-compat

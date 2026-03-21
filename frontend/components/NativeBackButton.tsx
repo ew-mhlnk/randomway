@@ -1,4 +1,6 @@
-'use client';
+// frontend\components\NativeBackButton.tsx
+
+'ause client';
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';

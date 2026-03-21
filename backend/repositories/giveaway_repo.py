@@ -1,3 +1,5 @@
+"""backend\repositories\giveaway_repo.py"""
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from models import Giveaway

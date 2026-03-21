@@ -1,3 +1,5 @@
+// frontend\app\create\publish\page.tsx
+
 'use client';
 
 import { useState } from 'react';

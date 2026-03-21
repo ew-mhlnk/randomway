@@ -1,3 +1,5 @@
+"""backend\repositories\base.py"""
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from typing import TypeVar, Generic, Type, Optional

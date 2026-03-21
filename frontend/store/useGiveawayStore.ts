@@ -1,3 +1,5 @@
+// frontend\store\useGiveawayStore.ts
+
 import { create } from 'zustand';
 
 export type GiveawayType = 'standard' | 'boosts' | 'invites' | 'custom';
