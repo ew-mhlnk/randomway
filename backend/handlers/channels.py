@@ -8,12 +8,11 @@ from aiogram import Router, Bot, F
 from aiogram.types import (
     Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo,
     ReplyKeyboardMarkup, KeyboardButton, KeyboardButtonRequestChat,
-    ChatAdministratorRights, ReplyKeyboardRemove, ChatMemberUpdated
+    ChatAdministratorRights, ReplyKeyboardRemove
 )
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.exceptions import TelegramBadRequest
 
 from sqlalchemy.future import select
 from database import AsyncSessionLocal
@@ -28,7 +27,7 @@ class ChannelStates(StatesGroup):
 
 
 def _back_kb() -> InlineKeyboardMarkup:
-    """Инлайн-кнопка для возврата в Mini App"""
+    """Кнопка возврата в Mini App"""
     return InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(
             text="🎲 Вернуться в приложение",
@@ -39,10 +38,9 @@ def _back_kb() -> InlineKeyboardMarkup:
 
 def _request_chat_kb() -> ReplyKeyboardMarkup:
     """
-    Генерирует нижние кнопки (Reply Keyboard), которые вызывают нативный
-    UI Телеграма для выбора канала/группы с заданными критериями прав.
+    Генерирует нативное нижнее меню Telegram (ReplyKeyboard) с критериями отбора каналов.
+    Показывает только каналы, где юзер админ с нужными правами.
     """
-    # Права для канала (как на твоем скриншоте)
     channel_rights = ChatAdministratorRights(
         is_anonymous=False, 
         can_manage_chat=True, 
@@ -51,7 +49,6 @@ def _request_chat_kb() -> ReplyKeyboardMarkup:
         can_delete_messages=True
     )
     
-    # Права для группы
     group_rights = ChatAdministratorRights(
         is_anonymous=False, 
         can_manage_chat=True, 
@@ -83,7 +80,7 @@ def _request_chat_kb() -> ReplyKeyboardMarkup:
             )
         ]],
         resize_keyboard=True,
-        is_persistent=True # Кнопки будут висеть, пока мы их принудительно не уберем
+        is_persistent=True # Важно, чтобы меню не пропадало само
     )
 
 
@@ -126,20 +123,19 @@ async def cmd_new_channel(message: Message, state: FSMContext):
         "🔥 Вы также можете добавить канал с помощью кнопки в меню "
         "(это удобно - бот сам добавится в админы с нужными правами) 👇🏻"
     )
-    # Отправляем Reply-клавиатуру (кнопки внизу экрана)
+    # Отправляем клавиатуру с нативными окнами
     await message.answer(text, reply_markup=_request_chat_kb())
 
 
-# ── ПОЛЬЗОВАТЕЛЬ ВЫБРАЛ КАНАЛ В НАТИВНОМ UI (chat_shared) ─────────────────────
+# ── СРАБАТЫВАЕТ, КОГДА ЮЗЕР ВЫБРАЛ КАНАЛ В ОКНЕ ───────────────────────────────
 @router.message(F.chat_shared)
 async def on_chat_shared(message: Message, bot: Bot, state: FSMContext):
-    """Срабатывает, когда пользователь выбрал канал через кнопку и назначил права"""
     chat_id = message.chat_shared.chat_id
     
-    # 1. Убираем огромные кнопки добавления канала снизу экрана
-    await message.answer("⏳ Сохраняем...", reply_markup=ReplyKeyboardRemove())
+    # 1. Убираем кнопки снизу экрана, чтобы они не мешали дальше
+    await message.answer("⏳ Проверяем канал...", reply_markup=ReplyKeyboardRemove())
     
-    # Даем Телеграму полсекунды на синхронизацию прав на их серверах
+    # Даем телеграму долю секунды, чтобы права на сервере точно синхронизировались
     await asyncio.sleep(0.5)
 
     try:
@@ -149,7 +145,7 @@ async def on_chat_shared(message: Message, bot: Bot, state: FSMContext):
         
         await state.clear()
         
-        # 2. Отправляем сообщение об успехе с инлайн-кнопкой для возврата
+        # 2. Сообщаем об успехе и даем кнопку возврата
         await message.answer(
             f"🎉 {kind} <b>{title}</b> успешно добавлен!\n"
             f"👥 Участников: <b>{count:,}</b>\n\n"
@@ -159,13 +155,13 @@ async def on_chat_shared(message: Message, bot: Bot, state: FSMContext):
     except Exception as e:
         logging.error(f"Ошибка в chat_shared: {e}")
         await message.answer(
-            "❌ Ошибка при добавлении. Возможно, вы не дали боту нужные права.\n"
-            "Попробуйте снова.",
-            reply_markup=_request_chat_kb() # Возвращаем кнопки обратно при ошибке
+            "❌ Ошибка при добавлении. Убедитесь, что вы подтвердили права для бота.\n"
+            "Попробуйте снова 👇",
+            reply_markup=_request_chat_kb()
         )
 
 
-# ── РЕЗЕРВНЫЙ ВАРИАНТ (Если юзер переслал сообщение или скинул @username) ──────
+# ── СРАБАТЫВАЕТ, ЕСЛИ ЮЗЕР СКИНУЛ @USERNAME ИЛИ ПЕРЕСЛАЛ СООБЩЕНИЕ ────────────
 @router.message(ChannelStates.waiting_for_channel)
 async def process_manual_channel(message: Message, state: FSMContext, bot: Bot):
     chat_id = None
@@ -178,7 +174,7 @@ async def process_manual_channel(message: Message, state: FSMContext, bot: Bot):
     if not chat_id:
         return
 
-    # Убираем клавиатуру
+    # Убираем кнопки-шторки
     await message.answer("🔍 Проверяем права...", reply_markup=ReplyKeyboardRemove())
 
     try:
@@ -188,7 +184,7 @@ async def process_manual_channel(message: Message, state: FSMContext, bot: Bot):
         if member.status != "administrator":
             await message.answer(
                 "❌ Бот ещё не администратор в этом канале.\n"
-                "Используйте кнопки меню ниже 👇",
+                "Сделайте его админом или используйте кнопки меню ниже 👇",
                 reply_markup=_request_chat_kb()
             )
             return
@@ -205,7 +201,7 @@ async def process_manual_channel(message: Message, state: FSMContext, bot: Bot):
         logging.error(f"process_manual error: {e}")
         await message.answer(
             "❌ Бот не имеет доступа к этому каналу.\n"
-            "Используйте кнопки ниже 👇", 
+            "Попробуйте добавить через меню 👇", 
             reply_markup=_request_chat_kb()
         )
 
