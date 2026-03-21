@@ -12,12 +12,12 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
-router = Router()
-MINI_APP_URL = os.getenv("MINI_APP_URL", "https://randomway.pro/")
-
 from sqlalchemy.future import select
 from database import AsyncSessionLocal
 from models import Channel
+
+router = Router()
+MINI_APP_URL = os.getenv("MINI_APP_URL", "https://randomway.pro/")
 
 
 class ChannelStates(StatesGroup):
@@ -37,8 +37,8 @@ def _back_kb() -> InlineKeyboardMarkup:
 def _request_chat_kb() -> ReplyKeyboardMarkup:
     """
     Генерирует нативное нижнее меню Telegram.
-    ВАЖНО: В Aiogram 3 все базовые права должны быть указаны явно (даже False), 
-    иначе библиотека выдает ошибку валидации!
+    Добавлены ВСЕ обязательные поля, включая новые права на Истории (Stories), 
+    чтобы aiogram не выдавал ошибку валидации.
     """
     # Полный набор прав для Канала
     channel_rights = ChatAdministratorRights(
@@ -52,7 +52,11 @@ def _request_chat_kb() -> ReplyKeyboardMarkup:
         can_restrict_members=False,
         can_promote_members=False,
         can_change_info=False,
-        can_invite_users=False
+        can_invite_users=False,
+        # Новые поля для Историй (из-за которых падала ошибка):
+        can_post_stories=False,
+        can_edit_stories=False,
+        can_delete_stories=False
     )
     
     # Полный набор прав для Группы
@@ -66,7 +70,11 @@ def _request_chat_kb() -> ReplyKeyboardMarkup:
         # Обязательные базовые поля (ставим False):
         can_manage_video_chats=False,
         can_promote_members=False,
-        can_change_info=False
+        can_change_info=False,
+        # Новые поля для Историй (из-за которых падала ошибка):
+        can_post_stories=False,
+        can_edit_stories=False,
+        can_delete_stories=False
     )
 
     return ReplyKeyboardMarkup(
