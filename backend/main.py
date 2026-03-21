@@ -1,5 +1,3 @@
-"""backend\main.py"""
-
 import logging
 import hashlib
 import uvicorn

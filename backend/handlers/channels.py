@@ -1,5 +1,3 @@
-"""backend\handlers\channels.py"""
-
 import logging
 import os
 import asyncio
@@ -14,12 +12,12 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
+router = Router()
+MINI_APP_URL = os.getenv("MINI_APP_URL", "https://randomway.pro/")
+
 from sqlalchemy.future import select
 from database import AsyncSessionLocal
 from models import Channel
-
-router = Router()
-MINI_APP_URL = os.getenv("MINI_APP_URL", "https://randomway.pro/")
 
 
 class ChannelStates(StatesGroup):
@@ -38,24 +36,37 @@ def _back_kb() -> InlineKeyboardMarkup:
 
 def _request_chat_kb() -> ReplyKeyboardMarkup:
     """
-    Генерирует нативное нижнее меню Telegram (ReplyKeyboard) с критериями отбора каналов.
-    Показывает только каналы, где юзер админ с нужными правами.
+    Генерирует нативное нижнее меню Telegram.
+    ВАЖНО: В Aiogram 3 все базовые права должны быть указаны явно (даже False), 
+    иначе библиотека выдает ошибку валидации!
     """
+    # Полный набор прав для Канала
     channel_rights = ChatAdministratorRights(
         is_anonymous=False, 
         can_manage_chat=True, 
         can_post_messages=True,
         can_edit_messages=True, 
-        can_delete_messages=True
+        can_delete_messages=True,
+        # Обязательные базовые поля (ставим False):
+        can_manage_video_chats=False,
+        can_restrict_members=False,
+        can_promote_members=False,
+        can_change_info=False,
+        can_invite_users=False
     )
     
+    # Полный набор прав для Группы
     group_rights = ChatAdministratorRights(
         is_anonymous=False, 
         can_manage_chat=True, 
         can_delete_messages=True,
         can_restrict_members=True,
         can_invite_users=True, 
-        can_pin_messages=True
+        can_pin_messages=True,
+        # Обязательные базовые поля (ставим False):
+        can_manage_video_chats=False,
+        can_promote_members=False,
+        can_change_info=False
     )
 
     return ReplyKeyboardMarkup(
@@ -80,7 +91,7 @@ def _request_chat_kb() -> ReplyKeyboardMarkup:
             )
         ]],
         resize_keyboard=True,
-        is_persistent=True # Важно, чтобы меню не пропадало само
+        is_persistent=True
     )
 
 
@@ -123,7 +134,6 @@ async def cmd_new_channel(message: Message, state: FSMContext):
         "🔥 Вы также можете добавить канал с помощью кнопки в меню "
         "(это удобно - бот сам добавится в админы с нужными правами) 👇🏻"
     )
-    # Отправляем клавиатуру с нативными окнами
     await message.answer(text, reply_markup=_request_chat_kb())
 
 
@@ -132,10 +142,8 @@ async def cmd_new_channel(message: Message, state: FSMContext):
 async def on_chat_shared(message: Message, bot: Bot, state: FSMContext):
     chat_id = message.chat_shared.chat_id
     
-    # 1. Убираем кнопки снизу экрана, чтобы они не мешали дальше
-    await message.answer("⏳ Проверяем канал...", reply_markup=ReplyKeyboardRemove())
-    
-    # Даем телеграму долю секунды, чтобы права на сервере точно синхронизировались
+    # Убираем кнопки снизу экрана
+    await message.answer("⏳ Проверяем права...", reply_markup=ReplyKeyboardRemove())
     await asyncio.sleep(0.5)
 
     try:
@@ -144,8 +152,6 @@ async def on_chat_shared(message: Message, bot: Bot, state: FSMContext):
         kind = "Канал" if chat.type == "channel" else "Группа"
         
         await state.clear()
-        
-        # 2. Сообщаем об успехе и даем кнопку возврата
         await message.answer(
             f"🎉 {kind} <b>{title}</b> успешно добавлен!\n"
             f"👥 Участников: <b>{count:,}</b>\n\n"
@@ -174,7 +180,6 @@ async def process_manual_channel(message: Message, state: FSMContext, bot: Bot):
     if not chat_id:
         return
 
-    # Убираем кнопки-шторки
     await message.answer("🔍 Проверяем права...", reply_markup=ReplyKeyboardRemove())
 
     try:

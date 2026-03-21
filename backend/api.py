@@ -1,5 +1,3 @@
-"""backend\api.py"""
-
 from fastapi import APIRouter, HTTPException, Depends, Response, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel

@@ -1,5 +1,3 @@
-"""backend\handlers\posts.py"""
-
 import os
 
 from aiogram import Router, F
