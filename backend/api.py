@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Depends, Response
+from fastapi import APIRouter, HTTPException, Depends, Response, Request, Security
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 import urllib.parse
 import hashlib
@@ -8,6 +9,7 @@ import os
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from aiogram.exceptions import TelegramBadRequest
 
 from database import get_db
 from models import User, Channel, PostTemplate
@@ -15,6 +17,7 @@ from services.giveaway_service import giveaway_service
 
 router = APIRouter()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+security = HTTPBearer()
 
 
 def validate_telegram_data(init_data: str) -> dict | None:
@@ -29,9 +32,17 @@ def validate_telegram_data(init_data: str) -> dict | None:
         return json.loads(parsed_data.get("user", "{}"))
     return None
 
-
-def get_user_id(init_data: str) -> int:
+# Dependency для получения ID пользователя из заголовка Authorization
+def get_user_id(credentials: HTTPAuthorizationCredentials = Depends(security)) -> int:
+    init_data = credentials.credentials
     user_data = validate_telegram_data(init_data)
+    if not user_data:
+        raise HTTPException(status_code=401, detail="Неверная подпись Telegram")
+    return user_data["id"]
+
+# Отдельная Dependency для фото, так как <img> передает initData через Query
+def get_user_id_from_query(initData: str) -> int:
+    user_data = validate_telegram_data(initData)
     if not user_data:
         raise HTTPException(status_code=401, detail="Не авторизован")
     return user_data["id"]
@@ -50,7 +61,6 @@ class AuthRequest(BaseModel):
     initData: str
 
 class GiveawayCreateRequest(BaseModel):
-    initData: str
     title: str
     type: str
     template_id: str
@@ -77,32 +87,15 @@ async def authenticate_user(request: AuthRequest, db: AsyncSession = Depends(get
     return {"status": "success", "user": user_data}
 
 
-# ── Bot info — фронт получает username бота для deep link ────────────────────
-
-@router.get("/bot-info")
-async def bot_info(initData: str):
-    """
-    Возвращает username бота.
-    Фронт использует его для ссылок: t.me/BOT?start=add_channel
-    Username кешируется в os.environ при старте (см. main.py lifespan).
-    """
-    get_user_id(initData)  # только проверка авторизации
-    username = os.environ.get("BOT_USERNAME", "")
-    if not username:
-        raise HTTPException(status_code=500, detail="BOT_USERNAME не инициализирован")
-    return {"username": username}
-
-
 # ── Channels ──────────────────────────────────────────────────────────────────
 
 @router.get("/channels")
-async def get_channels(initData: str, db: AsyncSession = Depends(get_db)):
-    user_id = get_user_id(initData)
+async def get_channels(user_id: int = Depends(get_user_id), db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Channel).where(Channel.owner_id == user_id, Channel.is_active == True)
     )
     channels = result.scalars().all()
-    return {"channels": [
+    return {"channels":[
         {
             "id": ch.id, "title": ch.title, "username": ch.username,
             "telegram_id": ch.telegram_id, "members_count": ch.members_count,
@@ -114,7 +107,7 @@ async def get_channels(initData: str, db: AsyncSession = Depends(get_db)):
 
 @router.get("/channels/{channel_id}/photo")
 async def channel_photo(channel_id: int, initData: str, db: AsyncSession = Depends(get_db)):
-    user_id = get_user_id(initData)
+    user_id = get_user_id_from_query(initData)
     result = await db.execute(
         select(Channel).where(Channel.id == channel_id, Channel.owner_id == user_id)
     )
@@ -141,15 +134,23 @@ async def channel_photo(channel_id: int, initData: str, db: AsyncSession = Depen
 
 
 @router.delete("/channels/{channel_id}")
-async def delete_channel(channel_id: int, initData: str, db: AsyncSession = Depends(get_db)):
-    user_id = get_user_id(initData)
+async def delete_channel(channel_id: int, request: Request, user_id: int = Depends(get_user_id), db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Channel).where(Channel.id == channel_id, Channel.owner_id == user_id)
     )
     ch = result.scalar_one_or_none()
     if not ch:
         raise HTTPException(status_code=404, detail="Канал не найден")
-    ch.is_active = False
+    
+    bot = request.app.state.bot
+    try:
+        await bot.leave_chat(ch.telegram_id)
+    except TelegramBadRequest:
+        pass # Бот уже был кикнут из чата вручную
+    except Exception as e:
+        print(f"Failed to leave chat: {e}")
+
+    await db.delete(ch) # Удаляем канал насовсем
     await db.commit()
     return {"status": "success"}
 
@@ -157,11 +158,10 @@ async def delete_channel(channel_id: int, initData: str, db: AsyncSession = Depe
 # ── Templates ─────────────────────────────────────────────────────────────────
 
 @router.get("/templates")
-async def get_templates(initData: str, db: AsyncSession = Depends(get_db)):
-    user_id = get_user_id(initData)
+async def get_templates(user_id: int = Depends(get_user_id), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(PostTemplate).where(PostTemplate.owner_id == user_id))
     templates = result.scalars().all()
-    return {"templates": [
+    return {"templates":[
         {
             "id": t.id, "text": t.text, "media_type": t.media_type,
             "button_text": t.button_text, "button_color": t.button_color,
@@ -170,22 +170,8 @@ async def get_templates(initData: str, db: AsyncSession = Depends(get_db)):
     ]}
 
 
-@router.get("/templates/{template_id}")
-async def get_template(template_id: int, initData: str, db: AsyncSession = Depends(get_db)):
-    user_id = get_user_id(initData)
-    result = await db.execute(
-        select(PostTemplate).where(PostTemplate.id == template_id, PostTemplate.owner_id == user_id)
-    )
-    t = result.scalar_one_or_none()
-    if not t:
-        raise HTTPException(status_code=404)
-    return {"id": t.id, "text": t.text, "media_id": t.media_id,
-            "media_type": t.media_type, "button_text": t.button_text, "button_color": t.button_color}
-
-
 @router.delete("/templates/{template_id}")
-async def delete_template(template_id: int, initData: str, db: AsyncSession = Depends(get_db)):
-    user_id = get_user_id(initData)
+async def delete_template(template_id: int, user_id: int = Depends(get_user_id), db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(PostTemplate).where(PostTemplate.id == template_id, PostTemplate.owner_id == user_id)
     )
@@ -200,25 +186,9 @@ async def delete_template(template_id: int, initData: str, db: AsyncSession = De
 # ── Giveaways ─────────────────────────────────────────────────────────────────
 
 @router.post("/giveaways")
-async def create_giveaway(request: GiveawayCreateRequest, db: AsyncSession = Depends(get_db)):
-    user_id = get_user_id(request.initData)
+async def create_giveaway(request_data: GiveawayCreateRequest, user_id: int = Depends(get_user_id), db: AsyncSession = Depends(get_db)):
     try:
-        g = await giveaway_service.create_draft(db, user_id, request.model_dump())
+        g = await giveaway_service.create_draft(db, user_id, request_data.model_dump())
         return {"status": "success", "giveaway_id": g.id}
-    except HTTPException: raise
-    except Exception as e: raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.get("/giveaways")
-async def get_giveaways(initData: str, db: AsyncSession = Depends(get_db)):
-    from models import Giveaway
-    user_id = get_user_id(initData)
-    result = await db.execute(select(Giveaway).where(Giveaway.creator_id == user_id))
-    giveaways = result.scalars().all()
-    return {"giveaways": [
-        {"id": g.id, "title": g.title, "type": g.giveaway_type,
-         "winners_count": g.winners_count, "is_active": g.is_active,
-         "start_date": g.start_date.isoformat() if g.start_date else None,
-         "end_date": g.end_date.isoformat() if g.end_date else None}
-        for g in giveaways
-    ]}
+    except Exception as e: 
+        raise HTTPException(status_code=400, detail=str(e))

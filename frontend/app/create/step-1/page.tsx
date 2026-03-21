@@ -52,7 +52,7 @@ export default function Step1Settings() {
         <button
           onClick={handleNext}
           disabled={!localTitle.trim()}
-          className="flex-[2] h-13 rounded-xl text-[16px] font-semibold text-white disabled:opacity-40"
+          className="flex-2 h-13 rounded-xl text-[16px] font-semibold text-white disabled:opacity-40"
           style={{ background: 'var(--accent-blue)' }}
         >
           Вперёд

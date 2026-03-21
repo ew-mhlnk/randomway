@@ -5,7 +5,7 @@ import { useTelegram } from '../providers/TelegramProvider';
 import NativeBackButton from '../../components/NativeBackButton';
 
 const API = 'https://api.randomway.pro';
-const BOT = process.env.NEXT_PUBLIC_BOT_USERNAME!;
+const BOT = process.env.NEXT_PUBLIC_BOT_USERNAME || 'RandomWayBot';
 
 interface Template {
   id: number;
@@ -22,18 +22,32 @@ export default function TemplatesPage() {
 
   useEffect(() => {
     if (!initData) return;
-    fetch(`${API}/templates?initData=${encodeURIComponent(initData)}`)
+    fetch(`${API}/templates`, {
+      headers: { 'Authorization': `Bearer ${initData}` }
+    })
       .then(r => r.json())
-      .then(d => setTemplates(d.templates ?? []))
+      .then(d => setTemplates(d.templates ??[]))
       .catch(console.error)
       .finally(() => setIsLoading(false));
-  }, [initData]);
+  },[initData]);
 
   const handleAdd = () => {
+    const tg = window.Telegram?.WebApp;
+    if (!tg) return;
+
     haptic?.impactOccurred('medium');
-    // Закрывает мини-апп → открывает бота → бот получает /start add_post
-    // → обработчик handle_deep_link в main.py → _show_prompt() → просит прислать пост
-    window.Telegram!.WebApp.openTelegramLink(`https://t.me/${BOT}?start=add_post`);
+    tg.showPopup({
+      title: '',
+      message: 'Приложение закроется, данные будут сохранены. Вы сможете продолжить с этого места.',
+      buttons:[
+        { id: 'cancel', type: 'cancel', text: 'Отмена' },
+        { id: 'ok', type: 'default', text: 'ОК' }
+      ]
+    }, (buttonId: string) => {
+      if (buttonId === 'ok') {
+        tg.openTelegramLink(`https://t.me/${BOT}?start=add_post`);
+      }
+    });
   };
 
   const handleDelete = async (id: number) => {
@@ -41,7 +55,10 @@ export default function TemplatesPage() {
     haptic?.impactOccurred('medium');
     setDeletingId(id);
     try {
-      await fetch(`${API}/templates/${id}?initData=${encodeURIComponent(initData)}`, { method: 'DELETE' });
+      await fetch(`${API}/templates/${id}`, { 
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${initData}` }
+      });
       setTemplates(prev => prev.filter(t => t.id !== id));
     } catch { alert('Не удалось удалить'); }
     finally { setDeletingId(null); }
@@ -62,7 +79,7 @@ export default function TemplatesPage() {
           <p style={{ color: 'var(--text-secondary)' }}>Шаблонов пока нет</p>
           <button onClick={handleAdd} className="px-6 py-3 rounded-xl text-white font-medium"
                   style={{ background: 'var(--accent-blue)' }}>
-            Создать шаблон
+            Создать пост
           </button>
         </div>
       ) : (

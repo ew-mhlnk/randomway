@@ -22,6 +22,18 @@ interface TelegramHaptic {
   selectionChanged: () => void;
 }
 
+interface PopupButton {
+  id?: string;
+  type?: 'default' | 'ok' | 'close' | 'cancel' | 'destructive';
+  text?: string;
+}
+
+interface PopupParams {
+  title?: string;
+  message: string;
+  buttons?: PopupButton[];
+}
+
 // Полная типизация WebApp — включает все методы актуального API
 interface TelegramWebApp {
   ready: () => void;
@@ -34,6 +46,8 @@ interface TelegramWebApp {
   colorScheme: 'light' | 'dark';
   openTelegramLink: (url: string) => void;
   openLink: (url: string) => void;
+  showPopup: (params: PopupParams, callback?: (buttonId: string) => void) => void;
+  showAlert: (message: string, callback?: () => void) => void;
   HapticFeedback: TelegramHaptic;
   BackButton: {
     show: () => void;

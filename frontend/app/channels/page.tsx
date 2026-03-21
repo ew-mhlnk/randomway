@@ -5,8 +5,7 @@ import { useTelegram } from '../providers/TelegramProvider';
 import NativeBackButton from '../../components/NativeBackButton';
 
 const API = 'https://api.randomway.pro';
-// NEXT_PUBLIC_BOT_USERNAME задаётся в переменных окружения Coolify (фронт)
-const BOT = process.env.NEXT_PUBLIC_BOT_USERNAME!;
+const BOT = process.env.NEXT_PUBLIC_BOT_USERNAME || 'RandomWayBot';
 
 interface Channel {
   id: number;
@@ -18,8 +17,10 @@ interface Channel {
 
 function Avatar({ channel, initData }: { channel: Channel; initData: string }) {
   const [err, setErr] = useState(false);
-  const colors = ['#1A8CFF', '#E020C0', '#2ECC71', '#E74C3C', '#F39C12'];
+  const colors =['#1A8CFF', '#E020C0', '#2ECC71', '#E74C3C', '#F39C12'];
+  
   if (channel.has_photo && !err) {
+    // Для картинок оставляем query-параметр, так как <img> не умеет отправлять заголовки
     return (
       <img
         src={`${API}/channels/${channel.id}/photo?initData=${encodeURIComponent(initData)}`}
@@ -40,34 +41,68 @@ function Avatar({ channel, initData }: { channel: Channel; initData: string }) {
 export default function ChannelsPage() {
   const { initData, haptic } = useTelegram();
   const [channels, setChannels] = useState<Channel[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const[isLoading, setIsLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
   useEffect(() => {
     if (!initData) return;
-    fetch(`${API}/channels?initData=${encodeURIComponent(initData)}`)
+    fetch(`${API}/channels`, {
+      headers: { 'Authorization': `Bearer ${initData}` }
+    })
       .then(r => r.json())
-      .then(d => setChannels(d.channels ?? []))
+      .then(d => setChannels(d.channels ??[]))
       .catch(console.error)
       .finally(() => setIsLoading(false));
-  }, [initData]);
+  },[initData]);
 
   const handleAdd = () => {
+    const tg = window.Telegram?.WebApp;
+    if (!tg) return;
+
     haptic?.impactOccurred('medium');
-    // Закрывает мини-апп → открывает бота → бот получает /start add_channel
-    // → обработчик handle_deep_link в main.py → channel_deep() → показывает меню
-    window.Telegram!.WebApp.openTelegramLink(`https://t.me/${BOT}?start=add_channel`);
+    
+    // Вызываем нативный popup Telegram
+    tg.showPopup({
+      title: '',
+      message: 'Приложение закроется, данные будут сохранены. Вы сможете продолжить с этого места.',
+      buttons:[
+        { id: 'cancel', type: 'cancel', text: 'Отмена' },
+        { id: 'ok', type: 'default', text: 'ОК' }
+      ]
+    }, (buttonId: string) => {
+      if (buttonId === 'ok') {
+        // Перекидываем пользователя в бота с командой /start add_channel
+        tg.openTelegramLink(`https://t.me/${BOT}?start=add_channel`);
+      }
+    });
   };
 
   const handleDelete = async (id: number) => {
-    if (!window.confirm('Удалить канал?')) return;
-    haptic?.impactOccurred('medium');
-    setDeletingId(id);
-    try {
-      await fetch(`${API}/channels/${id}?initData=${encodeURIComponent(initData)}`, { method: 'DELETE' });
-      setChannels(prev => prev.filter(c => c.id !== id));
-    } catch { alert('Не удалось удалить'); }
-    finally { setDeletingId(null); }
+    const tg = window.Telegram?.WebApp;
+    
+    tg?.showPopup({
+      message: 'Удалить этот канал? Бот автоматически выйдет из него.',
+      buttons:[
+        { id: 'cancel', type: 'cancel', text: 'Отмена' },
+        { id: 'delete', type: 'destructive', text: 'Удалить' }
+      ]
+    }, async (buttonId: string) => {
+      if (buttonId === 'delete') {
+        haptic?.impactOccurred('heavy');
+        setDeletingId(id);
+        try {
+          await fetch(`${API}/channels/${id}`, { 
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${initData}` }
+          });
+          setChannels(prev => prev.filter(c => c.id !== id));
+        } catch { 
+          tg.showAlert('Не удалось удалить канал'); 
+        } finally { 
+          setDeletingId(null); 
+        }
+      }
+    });
   };
 
   return (

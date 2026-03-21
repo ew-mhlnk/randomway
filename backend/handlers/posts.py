@@ -2,7 +2,7 @@ import os
 
 from aiogram import Router, F
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
-from aiogram.filters import Command, CommandStart, CommandObject
+from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
@@ -12,7 +12,7 @@ from models import PostTemplate
 router = Router()
 MINI_APP_URL = os.getenv("MINI_APP_URL", "https://randomway.pro/")
 
-MAX_TEXT  = 4096
+MAX_TEXT = 4096
 MAX_MEDIA = 1024
 
 
@@ -20,62 +20,54 @@ class PostStates(StatesGroup):
     waiting_for_post = State()
 
 
-def _back_kb():
+def _back_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="🎲 Вернуться в приложение", web_app=WebAppInfo(url=MINI_APP_URL))
     ]])
 
 
-async def _show_prompt(message: Message, state: FSMContext):
+# ── Ловим Deep Link редирект из Mini App ──────────────────────────────────────
+
+@router.message(CommandStart(deep_link=True, magic=F.args == "add_post"))
+async def cmd_add_post_deep_link(message: Message, state: FSMContext):
     await state.set_state(PostStates.waiting_for_post)
     await message.answer(
-        "💬 Отправьте мне текст вашего поста.\n"
-        "✨ Вы можете прислать текст с картинкой, видео или GIF.\n\n"
-        f"📏 Максимум символов:\n"
-        f"• Только текст: <b>{MAX_TEXT:,}</b>\n"
-        f"• С медиафайлом: <b>{MAX_MEDIA:,}</b>\n\n"
+        "💬 Отправьте мне текст вашего поста\n\n"
+        f"✨ Вы можете прислать текст с картинкой или видео, максимум символов без медиа: {MAX_TEXT}, c медиа: {MAX_MEDIA}.\n\n"
         "🔥 Бот поддерживает кастомные эмодзи!\n\n"
-        "Для отмены 👉 /cancel",
-        parse_mode="HTML",
+        "Для отмены нажмите 👉🏻 /cancel"
     )
 
 
-# ── /start add_post — вызывается из Mini App ──────────────────────────────────
-# Mini App: openTelegramLink("https://t.me/BOT?start=add_post")
-# Telegram → бот получает: /start add_post
-# CommandObject.args == "add_post"
+# ── Кнопка «💬 Создать пост» (через меню) ─────────────────────────────────────
 
-@router.message(CommandStart(deep_link=True))
-async def start_deep_link_post(message: Message, command: CommandObject, state: FSMContext):
-    if command.args == "add_post":
-        await _show_prompt(message, state)
+@router.message(F.text == "💬 Создать пост")
+async def btn_create_post(message: Message, state: FSMContext):
+    # Вызываем ту же самую функцию
+    await cmd_add_post_deep_link(message, state)
 
 
 # ── Приём поста ───────────────────────────────────────────────────────────────
 
 @router.message(PostStates.waiting_for_post)
 async def receive_post(message: Message, state: FSMContext):
-    text     = message.html_text or ""
+    text = message.html_text or ""
     media_id = None
     media_type = None
 
     if message.photo:
-        media_id   = message.photo[-1].file_id
+        media_id = message.photo[-1].file_id
         media_type = "photo"
     elif message.video:
-        media_id   = message.video.file_id
+        media_id = message.video.file_id
         media_type = "video"
     elif message.animation:
-        media_id   = message.animation.file_id
+        media_id = message.animation.file_id
         media_type = "animation"
 
     limit = MAX_MEDIA if media_id else MAX_TEXT
     if len(text) > limit:
-        await message.answer(
-            f"❌ Текст слишком длинный: <b>{len(text)}</b> симв. (лимит {limit:,}).\n"
-            "Сократите и отправьте снова.",
-            parse_mode="HTML",
-        )
+        await message.answer(f"❌ Текст слишком длинный: <b>{len(text)}</b> симв. (Лимит: {limit})\nСократите и отправьте снова.")
         return
 
     if not text and not media_id:
@@ -85,16 +77,16 @@ async def receive_post(message: Message, state: FSMContext):
     async with AsyncSessionLocal() as db:
         db.add(PostTemplate(
             owner_id=message.from_user.id,
-            text=text, media_id=media_id, media_type=media_type,
+            text=text,
+            media_id=media_id,
+            media_type=media_type,
         ))
         await db.commit()
 
     await state.clear()
-    label = {"photo": "📸 Фото", "video": "🎥 Видео", "animation": "🎞 GIF"}.get(media_type, "📝 Текст")
     await message.answer(
-        f"🎉 Пост создан и сохранён!\n{label} · {len(text)} симв.\n\nВернитесь в приложение 👇",
-        reply_markup=_back_kb(),
-        parse_mode="HTML",
+        f"✅ Пост успешно сохранён!\n\nВернитесь в приложение 👇",
+        reply_markup=_back_kb()
     )
 
 
