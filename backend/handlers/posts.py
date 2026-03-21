@@ -34,31 +34,30 @@ def _back_kb() -> InlineKeyboardMarkup:
     ]])
 
 
-# ── /newpost — срабатывает в двух случаях: ────────────────────────────────────
-# 1. Команда /newpost напрямую
-# 2. Deep link из Mini App: t.me/BOT?start=newpost → /start newpost
-# (Старая кнопка "💬 Создать пост" убрана вместе с Reply-клавиатурой)
+# ── /newpost ──────────────────────────────────────────────────────────────────
+# Срабатывает когда пользователь пишет /newpost прямо в боте.
+# Из Mini App flow идёт через /bot/request-post в api.py (FSM ставится там).
 
 @router.message(Command("newpost"))
-@router.message(Command("start"), F.text.contains("newpost"))
 async def cmd_new_post(message: Message, state: FSMContext):
     await state.set_state(PostStates.waiting_for_post)
+    await message.answer("✍️")
     await message.answer(
         "💬 Отправьте текст вашего поста.\n\n"
         f"✨ Можно прислать текст с картинкой или видео.\n"
         f"Лимит: <b>{MAX_TEXT}</b> симв. без медиа, <b>{MAX_MEDIA}</b> симв. с медиа.\n\n"
-        "🔥 Поддерживаются кастомные эмодзи!\n\n"
+        "Поддерживаются кастомные эмодзи!\n\n"
         "Для отмены — /cancel",
-        reply_markup=ReplyKeyboardRemove(),  # на случай если осталась старая клавиатура
+        reply_markup=ReplyKeyboardRemove(),
     )
 
 
-# ── Приём контента (текст / фото / видео / GIF) ───────────────────────────────
+# ── Приём контента ────────────────────────────────────────────────────────────
 
 @router.message(PostStates.waiting_for_post)
 async def receive_post_content(message: Message, state: FSMContext):
-    text      = message.html_text or ""
-    media_id  = None
+    text       = message.html_text or ""
+    media_id   = None
     media_type = None
 
     if message.photo:
@@ -97,9 +96,10 @@ async def receive_post_content(message: Message, state: FSMContext):
     label = {"photo": "📸 Фото", "video": "🎥 Видео", "animation": "🎞 GIF"}.get(
         media_type, "📝 Текст"
     )
+    # Анимированная галочка отдельным сообщением
+    await message.answer("✅")
     await message.answer(
-        f"✅ Пост успешно сохранён!\n\n"
-        f"{label} · {len(text)} симв.\n\n"
+        f"Пост сохранён! {label} · {len(text)} симв.\n\n"
         "Вернитесь в приложение 👇",
         reply_markup=_back_kb(),
     )

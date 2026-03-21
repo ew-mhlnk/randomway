@@ -27,7 +27,6 @@ class ChannelStates(StatesGroup):
 
 
 def _back_kb() -> InlineKeyboardMarkup:
-    """Inline-кнопка возврата в мини-апп"""
     return InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(
             text="🎲 Вернуться в приложение",
@@ -37,43 +36,24 @@ def _back_kb() -> InlineKeyboardMarkup:
 
 
 def _request_chat_kb() -> ReplyKeyboardMarkup:
-    """
-    Reply-клавиатура с кнопками выбора канала/группы через нативный пикер Telegram.
-    KeyboardButtonRequestChat — единственный способ открыть окно выбора чата.
-    persistent=False: клавиатура исчезнет после использования.
-    one_time_keyboard=True: скрывается после нажатия.
-    """
     channel_rights = ChatAdministratorRights(
-        is_anonymous=False,
-        can_manage_chat=True,
-        can_post_messages=True,
-        can_edit_messages=True,
-        can_delete_messages=True,
-        can_manage_video_chats=False,
-        can_restrict_members=False,
-        can_promote_members=False,
-        can_change_info=False,
-        can_invite_users=False,
+        is_anonymous=False, can_manage_chat=True, can_post_messages=True,
+        can_edit_messages=True, can_delete_messages=True,
+        can_manage_video_chats=False, can_restrict_members=False,
+        can_promote_members=False, can_change_info=False, can_invite_users=False,
     )
     group_rights = ChatAdministratorRights(
-        is_anonymous=False,
-        can_manage_chat=True,
-        can_delete_messages=True,
-        can_manage_video_chats=False,
-        can_restrict_members=True,
-        can_promote_members=False,
-        can_change_info=False,
-        can_invite_users=True,
-        can_pin_messages=True,
-        can_manage_topics=False,
+        is_anonymous=False, can_manage_chat=True, can_delete_messages=True,
+        can_manage_video_chats=False, can_restrict_members=True,
+        can_promote_members=False, can_change_info=False,
+        can_invite_users=True, can_pin_messages=True, can_manage_topics=False,
     )
     return ReplyKeyboardMarkup(
         keyboard=[[
             KeyboardButton(
                 text="📁 Добавить канал",
                 request_chat=KeyboardButtonRequestChat(
-                    request_id=1,
-                    chat_is_channel=True,
+                    request_id=1, chat_is_channel=True,
                     user_administrator_rights=channel_rights,
                     bot_administrator_rights=channel_rights,
                 )
@@ -81,21 +61,18 @@ def _request_chat_kb() -> ReplyKeyboardMarkup:
             KeyboardButton(
                 text="💬 Добавить группу",
                 request_chat=KeyboardButtonRequestChat(
-                    request_id=2,
-                    chat_is_channel=False,
+                    request_id=2, chat_is_channel=False,
                     user_administrator_rights=group_rights,
                     bot_administrator_rights=group_rights,
                 )
             ),
         ]],
         resize_keyboard=True,
-        one_time_keyboard=True,   # скрывается после выбора
-        # persistent=False — по умолчанию, клавиатура временная
+        one_time_keyboard=True,
     )
 
 
 async def _save_chat(chat_id: int, owner_id: int, bot: Bot) -> tuple[bool, str, int]:
-    """Сохраняет или обновляет канал/группу в базе данных."""
     chat  = await bot.get_chat(chat_id)
     count = await bot.get_chat_member_count(chat_id)
     photo = chat.photo.small_file_id if chat.photo else None
@@ -115,63 +92,56 @@ async def _save_chat(chat_id: int, owner_id: int, bot: Bot) -> tuple[bool, str, 
             return False, chat.title, count
 
         db.add(Channel(
-            telegram_id=chat.id,
-            owner_id=owner_id,
-            title=chat.title,
+            telegram_id=chat.id, owner_id=owner_id, title=chat.title,
             username=getattr(chat, "username", None),
-            members_count=count,
-            photo_file_id=photo,
+            members_count=count, photo_file_id=photo,
         ))
         await db.commit()
         return True, chat.title, count
 
 
-# ── /newchannel — срабатывает в трёх случаях: ─────────────────────────────────
-# 1. Команда /newchannel напрямую
-# 2. Deep link из Mini App: t.me/BOT?start=newchannel → /start newchannel
-# (Старые кнопки "📢 Добавить канал" / "👥 Добавить группу" убраны вместе с клавиатурой)
+# ── /newchannel ───────────────────────────────────────────────────────────────
+# Срабатывает когда пользователь пишет /newchannel прямо в боте.
+# Из Mini App flow идёт через /bot/request-channel в api.py (FSM ставится там).
 
 @router.message(Command("newchannel"))
-@router.message(Command("start"), F.text.contains("newchannel"))
 async def cmd_new_channel(message: Message, state: FSMContext):
     await state.set_state(ChannelStates.waiting_for_channel)
-
-    text = (
+    # Анимированный огонь — отдельным сообщением (Telegram рендерит его большим и анимированным)
+    await message.answer("🔥")
+    await message.answer(
         "💬 Пришлите <b>@username</b> канала или перешлите любое сообщение "
         "из канала (в том числе приватного).\n\n"
         "⚠️ Бот должен быть администратором канала с правами на публикацию "
         "и редактирование сообщений.\n\n"
         "Для отмены — /cancel\n\n"
-        "🔥 Или нажмите кнопку ниже — Telegram сам откроет список ваших каналов "
-        "и автоматически добавит бота с нужными правами 👇"
+        "Или нажмите кнопку ниже — Telegram откроет список ваших каналов "
+        "и автоматически добавит бота с нужными правами 👇",
+        reply_markup=_request_chat_kb(),
     )
-    await message.answer(text, reply_markup=_request_chat_kb())
 
 
-# ── Telegram вернул выбранный чат через нативный пикер ───────────────────────
+# ── Пользователь выбрал канал через нативный пикер ───────────────────────────
 
 @router.message(F.chat_shared)
 async def on_chat_shared(message: Message, bot: Bot, state: FSMContext):
     chat_id = message.chat_shared.chat_id
-    await message.answer("⏳ Добавляем, проверяем права...")
+    await message.answer("⏳ Добавляем...")
 
     try:
         chat = await bot.get_chat(chat_id)
         is_new, title, count = await _save_chat(chat.id, message.from_user.id, bot)
         kind = "Канал" if chat.type == "channel" else "Группа"
-
         await state.clear()
-
-        # Убираем reply-клавиатуру с кнопками пикера
         await message.answer("✅", reply_markup=ReplyKeyboardRemove())
-
+        # Анимированный фейерверк при успехе
+        await message.answer("🎉")
         await message.answer(
-            f"✅ {kind} <b>{title}</b> успешно добавлен!\n"
+            f"{kind} <b>{title}</b> успешно добавлен!\n"
             f"👥 Подписчиков: <b>{count:,}</b>\n\n"
-            "Вернитесь в приложение — канал уже отображается в списке.",
+            "Вернитесь в приложение — канал уже в списке.",
             reply_markup=_back_kb(),
         )
-
     except Exception as e:
         logging.error(f"chat_shared error: {e}")
         await message.answer(
@@ -181,17 +151,14 @@ async def on_chat_shared(message: Message, bot: Bot, state: FSMContext):
         )
 
 
-# ── Ручной ввод @username или пересылка из канала ────────────────────────────
+# ── Ручной ввод @username или пересылка ──────────────────────────────────────
 
 @router.message(ChannelStates.waiting_for_channel)
 async def process_manual_channel(message: Message, state: FSMContext, bot: Bot):
     chat_id = None
 
-    # Вариант 1: пересланное сообщение из канала
     if message.forward_origin and hasattr(message.forward_origin, "chat"):
         chat_id = message.forward_origin.chat.id
-
-    # Вариант 2: @username введён вручную
     elif message.text and message.text.startswith("@"):
         chat_id = message.text.strip()
 
@@ -218,15 +185,14 @@ async def process_manual_channel(message: Message, state: FSMContext, bot: Bot):
 
         is_new, title, count = await _save_chat(chat_id, message.from_user.id, bot)
         await state.clear()
-
         await message.answer("✅", reply_markup=ReplyKeyboardRemove())
+        await message.answer("🎉")
         await message.answer(
-            f"✅ <b>{title}</b> успешно добавлен!\n"
+            f"<b>{title}</b> успешно добавлен!\n"
             f"👥 Участников: <b>{count:,}</b>\n\n"
             "Вернитесь в приложение 👇",
             reply_markup=_back_kb(),
         )
-
     except Exception as e:
         logging.error(f"process_manual error: {e}")
         await message.answer(
@@ -241,4 +207,4 @@ async def process_manual_channel(message: Message, state: FSMContext, bot: Bot):
 async def cancel_channel(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("❌ Добавление отменено.", reply_markup=ReplyKeyboardRemove())
-    await message.answer("Вернитесь в приложение:", reply_markup=_back_kb())
+    await message.answer("Вернуться в приложение:", reply_markup=_back_kb())

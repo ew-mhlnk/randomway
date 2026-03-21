@@ -66,7 +66,7 @@ def fmt(count: int | None) -> str:
     return str(count)
 
 
-# ── Keyboard builders ─────────────────────────────────────────────────────────
+# ── Keyboards ─────────────────────────────────────────────────────────────────
 
 def _back_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
@@ -78,7 +78,6 @@ def _back_kb() -> InlineKeyboardMarkup:
 
 
 def _request_chat_kb() -> ReplyKeyboardMarkup:
-    """Reply-клавиатура с нативным пикером каналов/групп Telegram."""
     channel_rights = ChatAdministratorRights(
         is_anonymous=False, can_manage_chat=True, can_post_messages=True,
         can_edit_messages=True, can_delete_messages=True,
@@ -127,7 +126,7 @@ class GiveawayCreateRequest(BaseModel):
     winners_count: int
 
 
-# ── Bot Info ──────────────────────────────────────────────────────────────────
+# ── Bot info ──────────────────────────────────────────────────────────────────
 
 @router.get("/bot-info")
 async def bot_info(user_id: int = Depends(get_user_id)):
@@ -165,31 +164,24 @@ async def authenticate_user(request: AuthRequest, db: AsyncSession = Depends(get
 
 
 # ── Bot triggers ──────────────────────────────────────────────────────────────
-#
-# Единственный надёжный способ запустить бот-flow из Mini App:
-#
-#   1. Mini App делает POST на /bot/request-channel (или /bot/request-post)
-#   2. Бэкенд через bot.send_message() шлёт пользователю сообщение
-#   3. КРИТИЧНО: устанавливаем FSM-состояние через dp.storage напрямую,
-#      чтобы бот знал что ожидать от следующего сообщения пользователя
-#   4. Mini App вызывает tg.close() — пользователь видит сообщение бота
-#
-# Почему НЕ /start?start=newchannel:
-#   ?start= срабатывает ТОЛЬКО при первом запуске бота.
-#   Если бот уже запущен — Telegram открывает чат молча, команда не отправляется.
 
 @router.post("/bot/request-channel")
 async def bot_request_channel(request: Request, user_id: int = Depends(get_user_id)):
     """
-    Бот шлёт инструкцию + кнопки пикера. Устанавливает FSM waiting_for_channel.
+    1. Шлём пользователю сообщение с кнопками пикера
+    2. Устанавливаем FSM waiting_for_channel через dp.storage напрямую
+    bot_id берём из app.state — не делаем лишний get_me() запрос
     """
-    bot = request.app.state.bot
-    dp  = request.app.state.dp
+    bot    = request.app.state.bot
+    dp     = request.app.state.dp
+    bot_id = request.app.state.bot_id  # закешировано при старте, без network roundtrip
 
-    # Импортируем состояние здесь, чтобы избежать circular import
     from handlers.channels import ChannelStates
 
+    # Отправляем анимированный огонь отдельным сообщением (Telegram анимирует его)
+    # затем текст с инструкцией
     try:
+        await bot.send_message(chat_id=user_id, text="🔥")
         await bot.send_message(
             chat_id=user_id,
             text=(
@@ -198,7 +190,7 @@ async def bot_request_channel(request: Request, user_id: int = Depends(get_user_
                 "⚠️ Бот должен быть администратором канала с правами на публикацию "
                 "и редактирование сообщений.\n\n"
                 "Для отмены — /cancel\n\n"
-                "🔥 Или нажмите кнопку ниже — Telegram откроет список ваших каналов "
+                "Или нажмите кнопку ниже — Telegram откроет список ваших каналов "
                 "и автоматически добавит бота с нужными правами 👇"
             ),
             reply_markup=_request_chat_kb(),
@@ -206,8 +198,7 @@ async def bot_request_channel(request: Request, user_id: int = Depends(get_user_
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"send_message failed: {e}")
 
-    # Устанавливаем FSM-состояние: теперь бот ждёт канал от этого пользователя
-    bot_id = (await bot.get_me()).id
+    # Устанавливаем FSM-состояние — бот теперь ждёт канал от этого пользователя
     key = StorageKey(bot_id=bot_id, chat_id=user_id, user_id=user_id)
     await dp.storage.set_state(key=key, state=ChannelStates.waiting_for_channel)
 
@@ -217,28 +208,30 @@ async def bot_request_channel(request: Request, user_id: int = Depends(get_user_
 @router.post("/bot/request-post")
 async def bot_request_post(request: Request, user_id: int = Depends(get_user_id)):
     """
-    Бот шлёт инструкцию по созданию поста. Устанавливает FSM waiting_for_post.
+    1. Шлём пользователю инструкцию по созданию поста
+    2. Устанавливаем FSM waiting_for_post
     """
-    bot = request.app.state.bot
-    dp  = request.app.state.dp
+    bot    = request.app.state.bot
+    dp     = request.app.state.dp
+    bot_id = request.app.state.bot_id
 
     from handlers.posts import PostStates
 
     try:
+        await bot.send_message(chat_id=user_id, text="✍️")
         await bot.send_message(
             chat_id=user_id,
             text=(
                 "💬 Отправьте текст вашего поста.\n\n"
                 "✨ Можно прислать текст с картинкой или видео.\n"
                 "Лимит: <b>4096</b> симв. без медиа, <b>1024</b> симв. с медиа.\n\n"
-                "🔥 Поддерживаются кастомные эмодзи!\n\n"
+                "Поддерживаются кастомные эмодзи!\n\n"
                 "Для отмены — /cancel"
             ),
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"send_message failed: {e}")
 
-    bot_id = (await bot.get_me()).id
     key = StorageKey(bot_id=bot_id, chat_id=user_id, user_id=user_id)
     await dp.storage.set_state(key=key, state=PostStates.waiting_for_post)
 

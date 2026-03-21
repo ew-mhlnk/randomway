@@ -33,7 +33,6 @@ WEBHOOK_URL    = os.getenv("WEBHOOK_URL", "https://api.randomway.pro")
 WEBHOOK_PATH   = "/webhook"
 WEBHOOK_SECRET = hashlib.sha256(BOT_TOKEN.encode()).hexdigest()[:32]
 
-# FSM storage в памяти процесса — достаточно для текущего этапа
 storage = MemoryStorage()
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp  = Dispatcher(storage=storage)
@@ -50,8 +49,6 @@ async def start_default(message: Message):
             web_app=WebAppInfo(url=MINI_APP_URL)
         )
     ]])
-    # ReplyKeyboardRemove убирает старую persistent-клавиатуру у тех,
-    # кто пользовался предыдущей версией бота
     await message.answer(
         "👋 Привет! Я <b>RandomWay</b> — бот для честных розыгрышей.",
         reply_markup=ReplyKeyboardRemove()
@@ -61,12 +58,15 @@ async def start_default(message: Message):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # get_me() вызывается ОДИН РАЗ при старте — bot_id кешируется в app.state
     try:
         info = await bot.get_me()
         os.environ["BOT_USERNAME"] = info.username
-        logging.info(f"Bot: @{info.username}")
+        app.state.bot_id = info.id
+        logging.info(f"Bot: @{info.username} (id={info.id})")
     except Exception as e:
         logging.error(f"get_me failed: {e}")
+        app.state.bot_id = 0
 
     try:
         await bot.set_my_commands([
@@ -84,11 +84,10 @@ async def lifespan(app: FastAPI):
             allowed_updates=dp.resolve_used_update_types(),
             drop_pending_updates=True,
         )
-        logging.info(f"Webhook set: {WEBHOOK_URL}{WEBHOOK_PATH}")
+        logging.info(f"Webhook: {WEBHOOK_URL}{WEBHOOK_PATH}")
     except Exception as e:
         logging.error(f"set_webhook failed: {e}")
 
-    # Пробрасываем dp в app.state — нужен в api.py для установки FSM-состояния
     app.state.bot = bot
     app.state.dp  = dp
 
