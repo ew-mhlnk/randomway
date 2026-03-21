@@ -5,7 +5,6 @@ import { useTelegram } from '../providers/TelegramProvider';
 import NativeBackButton from '../../components/NativeBackButton';
 
 const API = 'https://api.randomway.pro';
-const BOT = process.env.NEXT_PUBLIC_BOT_USERNAME || 'RandomWayBot';
 
 interface Channel {
   id: number;
@@ -20,7 +19,7 @@ function Avatar({ channel, initData }: { channel: Channel; initData: string }) {
   const colors =['#1A8CFF', '#E020C0', '#2ECC71', '#E74C3C', '#F39C12'];
   
   if (channel.has_photo && !err) {
-    // Для картинок оставляем query-параметр, так как <img> не умеет отправлять заголовки
+    // Для картинок оставляем query-параметр, так как тег <img> не умеет отправлять заголовки
     return (
       <img
         src={`${API}/channels/${channel.id}/photo?initData=${encodeURIComponent(initData)}`}
@@ -40,8 +39,8 @@ function Avatar({ channel, initData }: { channel: Channel; initData: string }) {
 
 export default function ChannelsPage() {
   const { initData, haptic } = useTelegram();
-  const [channels, setChannels] = useState<Channel[]>([]);
-  const[isLoading, setIsLoading] = useState(true);
+  const[channels, setChannels] = useState<Channel[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
   useEffect(() => {
@@ -53,7 +52,7 @@ export default function ChannelsPage() {
       .then(d => setChannels(d.channels ??[]))
       .catch(console.error)
       .finally(() => setIsLoading(false));
-  },[initData]);
+  }, [initData]);
 
   const handleAdd = () => {
     const tg = window.Telegram?.WebApp;
@@ -61,7 +60,6 @@ export default function ChannelsPage() {
 
     haptic?.impactOccurred('medium');
     
-    // Вызываем нативный popup Telegram
     tg.showPopup({
       title: '',
       message: 'Приложение закроется, данные будут сохранены. Вы сможете продолжить с этого места.',
@@ -69,18 +67,32 @@ export default function ChannelsPage() {
         { id: 'cancel', type: 'cancel', text: 'Отмена' },
         { id: 'ok', type: 'default', text: 'ОК' }
       ]
-    }, (buttonId: string) => {
+    }, async (buttonId: string) => {
       if (buttonId === 'ok') {
-        // Перекидываем пользователя в бота с командой /start add_channel
-        tg.openTelegramLink(`https://t.me/${BOT}?start=add_channel`);
+        try {
+          // Динамически получаем юзернейм бота с бэкенда
+          const res = await fetch(`${API}/bot-info`, {
+            headers: { 'Authorization': `Bearer ${initData}` }
+          });
+          const data = await res.json();
+          
+          if (data.username) {
+            // Открываем бота с командой и сворачиваем мини-апп
+            tg.openTelegramLink(`https://t.me/${data.username}?start=newchannel`);
+            tg.close();
+          }
+        } catch (error) {
+          tg.showAlert('Не удалось связаться с сервером.');
+        }
       }
     });
   };
 
   const handleDelete = async (id: number) => {
     const tg = window.Telegram?.WebApp;
-    
-    tg?.showPopup({
+    if (!tg) return;
+
+    tg.showPopup({
       message: 'Удалить этот канал? Бот автоматически выйдет из него.',
       buttons:[
         { id: 'cancel', type: 'cancel', text: 'Отмена' },

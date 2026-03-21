@@ -5,7 +5,6 @@ import { useTelegram } from '../providers/TelegramProvider';
 import NativeBackButton from '../../components/NativeBackButton';
 
 const API = 'https://api.randomway.pro';
-const BOT = process.env.NEXT_PUBLIC_BOT_USERNAME || 'RandomWayBot';
 
 interface Template {
   id: number;
@@ -29,13 +28,14 @@ export default function TemplatesPage() {
       .then(d => setTemplates(d.templates ??[]))
       .catch(console.error)
       .finally(() => setIsLoading(false));
-  },[initData]);
+  }, [initData]);
 
   const handleAdd = () => {
     const tg = window.Telegram?.WebApp;
     if (!tg) return;
 
     haptic?.impactOccurred('medium');
+    
     tg.showPopup({
       title: '',
       message: 'Приложение закроется, данные будут сохранены. Вы сможете продолжить с этого места.',
@@ -43,25 +43,53 @@ export default function TemplatesPage() {
         { id: 'cancel', type: 'cancel', text: 'Отмена' },
         { id: 'ok', type: 'default', text: 'ОК' }
       ]
-    }, (buttonId: string) => {
+    }, async (buttonId: string) => {
       if (buttonId === 'ok') {
-        tg.openTelegramLink(`https://t.me/${BOT}?start=add_post`);
+        try {
+          const res = await fetch(`${API}/bot-info`, {
+            headers: { 'Authorization': `Bearer ${initData}` }
+          });
+          const data = await res.json();
+          
+          if (data.username) {
+            // Открываем бота с командой newpost и закрываем апп
+            tg.openTelegramLink(`https://t.me/${data.username}?start=newpost`);
+            tg.close();
+          }
+        } catch (error) {
+          tg.showAlert('Не удалось связаться с сервером.');
+        }
       }
     });
   };
 
   const handleDelete = async (id: number) => {
-    if (!window.confirm('Удалить?')) return;
-    haptic?.impactOccurred('medium');
-    setDeletingId(id);
-    try {
-      await fetch(`${API}/templates/${id}`, { 
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${initData}` }
-      });
-      setTemplates(prev => prev.filter(t => t.id !== id));
-    } catch { alert('Не удалось удалить'); }
-    finally { setDeletingId(null); }
+    const tg = window.Telegram?.WebApp;
+    if (!tg) return;
+
+    tg.showPopup({
+      message: 'Удалить этот шаблон?',
+      buttons:[
+        { id: 'cancel', type: 'cancel', text: 'Отмена' },
+        { id: 'delete', type: 'destructive', text: 'Удалить' }
+      ]
+    }, async (buttonId: string) => {
+      if (buttonId === 'delete') {
+        haptic?.impactOccurred('medium');
+        setDeletingId(id);
+        try {
+          await fetch(`${API}/templates/${id}`, { 
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${initData}` }
+          });
+          setTemplates(prev => prev.filter(t => t.id !== id));
+        } catch { 
+          tg.showAlert('Не удалось удалить шаблон'); 
+        } finally { 
+          setDeletingId(null); 
+        }
+      }
+    });
   };
 
   const icon = (t: string | null) => ({ photo: '🖼', video: '🎥', animation: '🎞' }[t ?? ''] ?? '📝');

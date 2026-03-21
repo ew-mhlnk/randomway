@@ -34,10 +34,11 @@ interface PopupParams {
   buttons?: PopupButton[];
 }
 
-// Полная типизация WebApp — включает все методы актуального API
+// Полная типизация WebApp
 interface TelegramWebApp {
   ready: () => void;
   expand: () => void;
+  close: () => void; // <--- ДОБАВИЛИ ЭТУ СТРОКУ
   isFullscreen: boolean;
   exitFullscreen: () => void;
   requestFullscreen: () => void;
