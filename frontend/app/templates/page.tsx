@@ -16,101 +16,123 @@ interface Template {
 }
 
 export default function TemplatesPage() {
-  const { initData, haptic } = useTelegram();
-  const[templates, setTemplates] = useState<Template[]>([]);
+  const { initData, haptic }      = useTelegram();
+  const [templates, setTemplates] = useState<Template[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<number | null>(null);
-  
-  const [botUsername, setBotUsername] = useState<string>('');
+  const [isAdding, setIsAdding]   = useState(false);
 
   useEffect(() => {
     if (!initData) return;
     fetch(`${API}/templates`, {
-      headers: { 'Authorization': `Bearer ${initData}` }
+      headers: { Authorization: `Bearer ${initData}` },
     })
       .then(r => r.json())
-      .then(d => setTemplates(d.templates ??[]))
+      .then(d => setTemplates(d.templates ?? []))
       .catch(console.error)
       .finally(() => setIsLoading(false));
-
-    fetch(`${API}/bot-info`, {
-      headers: { 'Authorization': `Bearer ${initData}` }
-    })
-      .then(r => r.json())
-      .then(d => { if (d.username) setBotUsername(d.username); })
-      .catch(console.error);
   }, [initData]);
 
-  const handleAdd = () => {
-    const tg = window.Telegram?.WebApp;
-    if (!tg) return;
+  // ─── Создать пост ─────────────────────────────────────────────────────────
+  // Та же логика что и с каналами — бот шлёт сообщение, Mini App закрывается.
 
-    if (!botUsername) {
-      tg.showAlert("Бот еще загружается, подождите секунду...");
-      return;
-    }
+  const handleAdd = async () => {
+    const tg = window.Telegram?.WebApp;
+    if (!tg || !initData || isAdding) return;
 
     haptic?.impactOccurred('medium');
-    
-    tg.showPopup({
-      title: '',
-      message: 'Приложение закроется, данные будут сохранены. Вы сможете продолжить с этого места.',
-      buttons:[
-        { id: 'cancel', type: 'cancel', text: 'Отмена' },
-        { id: 'ok', type: 'default', text: 'ОК' }
-      ]
-    }, (buttonId: string) => {
-      if (buttonId === 'ok') {
-        tg.openTelegramLink(`https://t.me/${botUsername}?start=newpost`);
+
+    tg.showPopup(
+      {
+        title: '',
+        message:
+          'Приложение закроется, данные будут сохранены. Вы сможете продолжить с этого места.',
+        buttons: [
+          { id: 'cancel', type: 'cancel', text: 'Отмена' },
+          { id: 'ok', type: 'default', text: 'ОК' },
+        ],
+      },
+      async (buttonId: string) => {
+        if (buttonId !== 'ok') return;
+
+        setIsAdding(true);
+        try {
+          await fetch(`${API}/bot/request-post`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${initData}` },
+          });
+        } catch (e) {
+          console.error('request-post failed', e);
+        } finally {
+          setIsAdding(false);
+        }
+
+        tg.close();
       }
-    });
+    );
   };
+
+  // ─── Удалить шаблон ───────────────────────────────────────────────────────
 
   const handleDelete = async (id: number) => {
     const tg = window.Telegram?.WebApp;
     if (!tg) return;
 
-    tg.showPopup({
-      message: 'Удалить этот шаблон?',
-      buttons:[
-        { id: 'cancel', type: 'cancel', text: 'Отмена' },
-        { id: 'delete', type: 'destructive', text: 'Удалить' }
-      ]
-    }, async (buttonId: string) => {
-      if (buttonId === 'delete') {
+    tg.showPopup(
+      {
+        message: 'Удалить этот шаблон?',
+        buttons: [
+          { id: 'cancel', type: 'cancel', text: 'Отмена' },
+          { id: 'delete', type: 'destructive', text: 'Удалить' },
+        ],
+      },
+      async (buttonId: string) => {
+        if (buttonId !== 'delete') return;
         haptic?.impactOccurred('medium');
         setDeletingId(id);
         try {
-          await fetch(`${API}/templates/${id}`, { 
+          await fetch(`${API}/templates/${id}`, {
             method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${initData}` }
+            headers: { Authorization: `Bearer ${initData}` },
           });
           setTemplates(prev => prev.filter(t => t.id !== id));
-        } catch { 
-          tg.showAlert('Не удалось удалить шаблон'); 
-        } finally { 
-          setDeletingId(null); 
+        } catch {
+          tg.showAlert('Не удалось удалить шаблон');
+        } finally {
+          setDeletingId(null);
         }
       }
-    });
+    );
   };
 
-  const icon = (t: string | null) => ({ photo: '🖼', video: '🎥', animation: '🎞' }[t ?? ''] ?? '📝');
+  const icon = (t: string | null) =>
+    ({ photo: '🖼', video: '🎥', animation: '🎞' }[t ?? ''] ?? '📝');
 
   return (
     <main className="min-h-screen p-4 pt-6 flex flex-col">
       <NativeBackButton />
-      <h1 className="text-2xl font-medium text-center mb-6" style={{ color: 'var(--text-primary)' }}>Шаблоны постов</h1>
+      <h1
+        className="text-2xl font-medium text-center mb-6"
+        style={{ color: 'var(--text-primary)' }}
+      >
+        Шаблоны постов
+      </h1>
 
       {isLoading ? (
-        <p className="text-center mt-10" style={{ color: 'var(--text-secondary)' }}>Загрузка...</p>
+        <p className="text-center mt-10" style={{ color: 'var(--text-secondary)' }}>
+          Загрузка...
+        </p>
       ) : templates.length === 0 ? (
         <div className="flex flex-col items-center gap-4 mt-10 text-center">
           <span className="text-5xl">📝</span>
           <p style={{ color: 'var(--text-secondary)' }}>Шаблонов пока нет</p>
-          <button onClick={handleAdd} className="px-6 py-3 rounded-xl text-white font-medium"
-                  style={{ background: 'var(--accent-blue)' }}>
-            Создать пост
+          <button
+            onClick={handleAdd}
+            disabled={isAdding}
+            className="px-6 py-3 rounded-xl text-white font-medium disabled:opacity-50"
+            style={{ background: 'var(--accent-blue)' }}
+          >
+            {isAdding ? 'Отправляем...' : 'Создать пост'}
           </button>
         </div>
       ) : (
@@ -120,16 +142,24 @@ export default function TemplatesPage() {
               <div className="flex items-start gap-3">
                 <span className="text-2xl shrink-0">{icon(t.media_type)}</span>
                 <div className="flex-1 min-w-0">
-                  <p className="text-[14px] leading-5" style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>
+                  <p
+                    className="text-[14px] leading-5"
+                    style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}
+                  >
                     {t.preview}
                   </p>
                   <p className="text-[12px] mt-1" style={{ color: 'var(--text-secondary)' }}>
                     Кнопка: «{t.button_text}»
                   </p>
                 </div>
-                <button onClick={() => handleDelete(t.id)} disabled={deletingId === t.id}
-                        className="shrink-0 text-[13px] px-3 py-1"
-                        style={{ color: deletingId === t.id ? 'var(--text-secondary)' : '#E74C3C' }}>
+                <button
+                  onClick={() => handleDelete(t.id)}
+                  disabled={deletingId === t.id}
+                  className="shrink-0 text-[13px] px-3 py-1"
+                  style={{
+                    color: deletingId === t.id ? 'var(--text-secondary)' : '#E74C3C',
+                  }}
+                >
                   {deletingId === t.id ? '...' : 'удалить'}
                 </button>
               </div>
@@ -139,9 +169,14 @@ export default function TemplatesPage() {
       )}
 
       {templates.length > 0 && (
-        <button onClick={handleAdd}
-                className="fixed bottom-10 left-1/2 -translate-x-1/2 w-14 h-14 rounded-full flex items-center justify-center text-white text-3xl shadow-lg active:scale-95 transition-transform"
-                style={{ background: 'var(--accent-blue)' }}>+</button>
+        <button
+          onClick={handleAdd}
+          disabled={isAdding}
+          className="fixed bottom-10 left-1/2 -translate-x-1/2 w-14 h-14 rounded-full flex items-center justify-center text-white text-3xl shadow-lg active:scale-95 transition-transform disabled:opacity-50"
+          style={{ background: 'var(--accent-blue)' }}
+        >
+          {isAdding ? '…' : '+'}
+        </button>
       )}
     </main>
   );
