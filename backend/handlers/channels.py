@@ -2,11 +2,13 @@
 
 import logging
 import os
+import asyncio
 
 from aiogram import Router, Bot, F
 from aiogram.types import (
     Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo,
-    ChatMemberUpdated
+    ReplyKeyboardMarkup, KeyboardButton, KeyboardButtonRequestChat,
+    ChatAdministratorRights, ReplyKeyboardRemove, ChatMemberUpdated
 )
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -26,6 +28,7 @@ class ChannelStates(StatesGroup):
 
 
 def _back_kb() -> InlineKeyboardMarkup:
+    """Инлайн-кнопка для возврата в Mini App"""
     return InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(
             text="🎲 Вернуться в приложение",
@@ -34,15 +37,54 @@ def _back_kb() -> InlineKeyboardMarkup:
     ]])
 
 
-def _add_chat_kb(bot_username: str) -> InlineKeyboardMarkup:
-    # Генерируем Deep Links. Telegram сам откроет меню выбора канала и добавит бота!
-    channel_url = f"https://t.me/{bot_username}?startchannel=true&admin=post_messages+edit_messages+delete_messages"
-    group_url = f"https://t.me/{bot_username}?startgroup=true&admin=delete_messages+restrict_members+invite_users+pin_messages"
+def _request_chat_kb() -> ReplyKeyboardMarkup:
+    """
+    Генерирует нижние кнопки (Reply Keyboard), которые вызывают нативный
+    UI Телеграма для выбора канала/группы с заданными критериями прав.
+    """
+    # Права для канала (как на твоем скриншоте)
+    channel_rights = ChatAdministratorRights(
+        is_anonymous=False, 
+        can_manage_chat=True, 
+        can_post_messages=True,
+        can_edit_messages=True, 
+        can_delete_messages=True
+    )
     
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📁 Добавить канал", url=channel_url)],
-        [InlineKeyboardButton(text="💬 Добавить группу", url=group_url)]
-    ])
+    # Права для группы
+    group_rights = ChatAdministratorRights(
+        is_anonymous=False, 
+        can_manage_chat=True, 
+        can_delete_messages=True,
+        can_restrict_members=True,
+        can_invite_users=True, 
+        can_pin_messages=True
+    )
+
+    return ReplyKeyboardMarkup(
+        keyboard=[[
+            KeyboardButton(
+                text="📁 Добавить канал",
+                request_chat=KeyboardButtonRequestChat(
+                    request_id=1, 
+                    chat_is_channel=True,
+                    user_administrator_rights=channel_rights,
+                    bot_administrator_rights=channel_rights
+                )
+            ),
+            KeyboardButton(
+                text="💬 Добавить группу",
+                request_chat=KeyboardButtonRequestChat(
+                    request_id=2, 
+                    chat_is_channel=False,
+                    user_administrator_rights=group_rights,
+                    bot_administrator_rights=group_rights
+                )
+            )
+        ]],
+        resize_keyboard=True,
+        is_persistent=True # Кнопки будут висеть, пока мы их принудительно не уберем
+    )
 
 
 async def _save_chat(chat_id: int, owner_id: int, bot: Bot) -> tuple[bool, str, int]:
@@ -75,7 +117,6 @@ async def _save_chat(chat_id: int, owner_id: int, bot: Bot) -> tuple[bool, str, 
 @router.message(Command("newchannel"))
 async def cmd_new_channel(message: Message, state: FSMContext):
     await state.set_state(ChannelStates.waiting_for_channel)
-    bot_username = os.getenv("BOT_USERNAME", "")
     
     text = (
         "💬 Пришлите <b>username</b> канала в формате @durov или перешлите сообщение "
@@ -85,39 +126,46 @@ async def cmd_new_channel(message: Message, state: FSMContext):
         "🔥 Вы также можете добавить канал с помощью кнопки в меню "
         "(это удобно - бот сам добавится в админы с нужными правами) 👇🏻"
     )
-    await message.answer(text, reply_markup=_add_chat_kb(bot_username))
+    # Отправляем Reply-клавиатуру (кнопки внизу экрана)
+    await message.answer(text, reply_markup=_request_chat_kb())
 
 
-# ── АВТОМАТИЧЕСКИЙ ПЕРЕХВАТ ДОБАВЛЕНИЯ БОТА (Deep Link Magic) ────────────────
-@router.my_chat_member()
-async def on_bot_added_to_chat(update: ChatMemberUpdated, bot: Bot, state: FSMContext):
-    """Срабатывает мгновенно, когда юзер назначает бота админом через инлайн-кнопку"""
+# ── ПОЛЬЗОВАТЕЛЬ ВЫБРАЛ КАНАЛ В НАТИВНОМ UI (chat_shared) ─────────────────────
+@router.message(F.chat_shared)
+async def on_chat_shared(message: Message, bot: Bot, state: FSMContext):
+    """Срабатывает, когда пользователь выбрал канал через кнопку и назначил права"""
+    chat_id = message.chat_shared.chat_id
     
-    # Нас интересует только когда бот становится админом
-    if update.new_chat_member.status == "administrator":
-        chat = update.chat
-        owner_id = update.from_user.id  # ID человека, который добавил бота
+    # 1. Убираем огромные кнопки добавления канала снизу экрана
+    await message.answer("⏳ Сохраняем...", reply_markup=ReplyKeyboardRemove())
+    
+    # Даем Телеграму полсекунды на синхронизацию прав на их серверах
+    await asyncio.sleep(0.5)
+
+    try:
+        chat = await bot.get_chat(chat_id)
+        is_new, title, count = await _save_chat(chat.id, message.from_user.id, bot)
+        kind = "Канал" if chat.type == "channel" else "Группа"
         
-        try:
-            is_new, title, count = await _save_chat(chat.id, owner_id, bot)
-            kind = "Канал" if chat.type == "channel" else "Группа"
-            
-            # Сбрасываем ожидание, если оно было
-            await state.clear()
-            
-            # Отправляем юзеру в ЛИЧКУ сообщение об успехе
-            await bot.send_message(
-                chat_id=owner_id,
-                text=f"🎉 {kind} <b>{title}</b> успешно добавлен!\n"
-                     f"👥 Участников: <b>{count:,}</b>\n\n"
-                     "Теперь он доступен в приложении 👇",
-                reply_markup=_back_kb()
-            )
-        except Exception as e:
-            logging.error(f"Ошибка при сохранении канала из my_chat_member: {e}")
+        await state.clear()
+        
+        # 2. Отправляем сообщение об успехе с инлайн-кнопкой для возврата
+        await message.answer(
+            f"🎉 {kind} <b>{title}</b> успешно добавлен!\n"
+            f"👥 Участников: <b>{count:,}</b>\n\n"
+            "Вернитесь в приложение — он уже в списке.",
+            reply_markup=_back_kb()
+        )
+    except Exception as e:
+        logging.error(f"Ошибка в chat_shared: {e}")
+        await message.answer(
+            "❌ Ошибка при добавлении. Возможно, вы не дали боту нужные права.\n"
+            "Попробуйте снова.",
+            reply_markup=_request_chat_kb() # Возвращаем кнопки обратно при ошибке
+        )
 
 
-# ── РУЧНОЙ ВВОД (Резервный вариант) ──────────────────────────────────────────
+# ── РЕЗЕРВНЫЙ ВАРИАНТ (Если юзер переслал сообщение или скинул @username) ──────
 @router.message(ChannelStates.waiting_for_channel)
 async def process_manual_channel(message: Message, state: FSMContext, bot: Bot):
     chat_id = None
@@ -128,50 +176,43 @@ async def process_manual_channel(message: Message, state: FSMContext, bot: Bot):
         chat_id = message.text.strip()
 
     if not chat_id:
-        await message.answer(
-            "❌ Не понял. Пришлите <b>@username</b> канала "
-            "или перешлите любое сообщение из него."
-        )
         return
 
-    await message.answer("🔍 Проверяем права...")
+    # Убираем клавиатуру
+    await message.answer("🔍 Проверяем права...", reply_markup=ReplyKeyboardRemove())
 
     try:
         me = await bot.get_me()
         member = await bot.get_chat_member(chat_id=chat_id, user_id=me.id)
 
         if member.status != "administrator":
-            bot_username = os.getenv("BOT_USERNAME", "")
             await message.answer(
                 "❌ Бот ещё не администратор в этом канале.\n"
-                "Сделайте его админом или используйте кнопки ниже 👇",
-                reply_markup=_add_chat_kb(bot_username)
+                "Используйте кнопки меню ниже 👇",
+                reply_markup=_request_chat_kb()
             )
             return
 
         is_new, title, count = await _save_chat(chat_id, message.from_user.id, bot)
         await state.clear()
-        
         await message.answer(
             f"🎉 <b>{title}</b> успешно добавлен!\n"
             f"👥 Участников: <b>{count:,}</b>\n\n"
             "Вернитесь в приложение 👇",
             reply_markup=_back_kb()
         )
-    except TelegramBadRequest:
-        bot_username = os.getenv("BOT_USERNAME", "")
-        await message.answer(
-            "❌ Бот не имеет доступа к этому каналу.\n"
-            "Сначала добавьте его в администраторы с помощью кнопки ниже 👇",
-            reply_markup=_add_chat_kb(bot_username)
-        )
     except Exception as e:
         logging.error(f"process_manual error: {e}")
-        await message.answer("❌ Произошла ошибка. Попробуйте еще раз.")
+        await message.answer(
+            "❌ Бот не имеет доступа к этому каналу.\n"
+            "Используйте кнопки ниже 👇", 
+            reply_markup=_request_chat_kb()
+        )
 
 
 # ── /cancel ───────────────────────────────────────────────────────────────────
 @router.message(Command("cancel"), ChannelStates.waiting_for_channel)
 async def cancel_channel(message: Message, state: FSMContext):
     await state.clear()
-    await message.answer("❌ Добавление отменено.", reply_markup=_back_kb())
+    await message.answer("❌ Добавление отменено.", reply_markup=ReplyKeyboardRemove())
+    await message.answer("Вы можете вернуться в приложение.", reply_markup=_back_kb())
