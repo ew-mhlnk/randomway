@@ -1,8 +1,8 @@
 import os
 
 from aiogram import Router, F
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
-from aiogram.filters import Command, CommandStart
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo, ReplyKeyboardRemove
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
@@ -26,17 +26,22 @@ def _back_kb() -> InlineKeyboardMarkup:
     ]])
 
 
-# ── 1. Ловим команду /newpost ИЛИ диплинк из Mini App ───────────────────────
+# ── 1. ЖЕЛЕЗОБЕТОННЫЙ ПЕРЕХВАТ ────────────────────────────────────────────────
+# Ловит: 1) /newpost  2) диплинк /start newpost  3) кнопку меню "Создать пост"
 
 @router.message(Command("newpost"))
-@router.message(CommandStart(deep_link=True, magic=F.args == "newpost"))
+@router.message(Command("start"), F.text.contains("newpost"))
+@router.message(F.text == "💬 Создать пост")
 async def cmd_new_post(message: Message, state: FSMContext):
     await state.set_state(PostStates.waiting_for_post)
+    
+    # Скрываем главную клавиатуру, чтобы не мешалась, пока юзер пишет пост
     await message.answer(
         "💬 Отправьте мне текст вашего поста\n\n"
         f"✨ Вы можете прислать текст с картинкой или видео, максимум символов без медиа: {MAX_TEXT}, c медиа: {MAX_MEDIA}.\n\n"
         "🔥 Бот поддерживает кастомные эмодзи!\n\n"
-        "Для отмены нажмите 👉🏻 /cancel"
+        "Для отмены нажмите 👉🏻 /cancel",
+        reply_markup=ReplyKeyboardRemove()
     )
 
 

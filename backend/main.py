@@ -12,7 +12,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 from aiogram.types import (
-    Message, ReplyKeyboardMarkup, KeyboardButton, WebAppInfo
+    Message, ReplyKeyboardMarkup, KeyboardButton, WebAppInfo, BotCommand
 )
 from aiogram.filters import CommandStart
 
@@ -33,6 +33,7 @@ dp.include_router(posts_router)
 
 
 def _main_keyboard() -> ReplyKeyboardMarkup:
+    """Постоянная клавиатура в боте"""
     return ReplyKeyboardMarkup(
         keyboard=[[
                 KeyboardButton(text="📢 Добавить канал"),
@@ -62,6 +63,7 @@ async def start_default(message: Message):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 1. Записываем юзернейм для API
     try:
         bot_info = await bot.get_me()
         os.environ["BOT_USERNAME"] = bot_info.username
@@ -69,18 +71,21 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logging.error(f"get_me failed: {e}")
 
+    # 2. РЕГИСТРИРУЕМ КОМАНДЫ (чтобы появилось синее меню в боте)
     try:
-        await bot.delete_my_commands()
-    except Exception:
-        pass
+        await bot.set_my_commands([
+            BotCommand(command="newchannel", description="Добавить канал или группу"),
+            BotCommand(command="newpost", description="Создать новый шаблон поста"),
+            BotCommand(command="cancel", description="Отменить текущее действие"),
+        ])
+    except Exception as e:
+        logging.error(f"set_my_commands failed: {e}")
 
-    # Прокидываем инстанс бота в FastAPI для вызова из эндпоинтов (например, leave_chat)
     app.state.bot = bot
     polling_task = asyncio.create_task(dp.start_polling(bot))
     
     yield
     
-    # Безопасное завершение
     await dp.stop_polling()
     polling_task.cancel()
     await bot.session.close()
@@ -101,7 +106,7 @@ app.include_router(api_router)
 
 @app.get("/")
 async def root():
-    return {"status": "ok", "message": "RandomWay 🚀"}
+    return {"status": "ok"}
 
 
 if __name__ == "__main__":

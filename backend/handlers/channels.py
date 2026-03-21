@@ -6,9 +6,9 @@ from aiogram.types import (
     Message, ChatMemberUpdated,
     InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo,
     ReplyKeyboardMarkup, KeyboardButton, KeyboardButtonRequestChat,
-    ChatAdministratorRights
+    ChatAdministratorRights, ReplyKeyboardRemove
 )
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command
 from aiogram.filters.chat_member_updated import (
     ChatMemberUpdatedFilter, IS_NOT_MEMBER, ADMINISTRATOR
 )
@@ -28,14 +28,14 @@ class ChannelStates(StatesGroup):
 
 
 def _back_kb() -> InlineKeyboardMarkup:
-    """Кнопка возврата в мини-апп после успеха"""
+    """Кнопка возврата в мини-апп"""
     return InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="🎲 Вернуться в приложение", web_app=WebAppInfo(url=MINI_APP_URL))
     ]])
 
 
 def _request_chat_kb() -> ReplyKeyboardMarkup:
-    """Нижняя клавиатура (Reply) ТОЧНО КАК НА СКРИНШОТЕ 1"""
+    """Нижняя клавиатура (Reply) ТОЧНО КАК НА ТВОЕМ СКРИНШОТЕ 1"""
     channel_rights = ChatAdministratorRights(
         is_anonymous=False, can_manage_chat=True, can_post_messages=True,
         can_edit_messages=True, can_delete_messages=True, can_manage_video_chats=False,
@@ -95,10 +95,13 @@ async def _save_chat(chat_id: int, owner_id: int, bot: Bot) -> tuple[bool, str, 
         return True, chat.title, count
 
 
-# ── 1. Ловим команду /newchannel ИЛИ диплинк из Mini App ────────────────────
+# ── 1. ЖЕЛЕЗОБЕТОННЫЙ ПЕРЕХВАТ ────────────────────────────────────────────────
+# Ловит: 1) /newchannel  2) диплинк /start newchannel  3) кнопку меню "Добавить канал"
 
 @router.message(Command("newchannel"))
-@router.message(CommandStart(deep_link=True, magic=F.args == "newchannel"))
+@router.message(Command("start"), F.text.contains("newchannel"))
+@router.message(F.text == "📢 Добавить канал")
+@router.message(F.text == "👥 Добавить группу")
 async def cmd_new_channel(message: Message, state: FSMContext):
     await state.set_state(ChannelStates.waiting_for_channel)
     
@@ -114,7 +117,7 @@ async def cmd_new_channel(message: Message, state: FSMContext):
     await message.answer(text, reply_markup=_request_chat_kb())
 
 
-# ── 2. Обработка кнопок из Reply-клавиатуры (Скриншот 2) ────────────────────
+# ── 2. Обработка окна выбора (Скриншот 2) ─────────────────────────────────────
 
 @router.message(F.chat_shared)
 async def on_chat_shared(message: Message, bot: Bot, state: FSMContext):
@@ -128,8 +131,7 @@ async def on_chat_shared(message: Message, bot: Bot, state: FSMContext):
         
         await state.clear()
         
-        # Убираем reply клавиатуру и показываем кнопку возврата
-        from aiogram.types import ReplyKeyboardRemove
+        # Убираем клавиатуру с кнопками "Добавить"
         await message.answer("✅", reply_markup=ReplyKeyboardRemove())
         
         await message.answer(
@@ -143,7 +145,7 @@ async def on_chat_shared(message: Message, bot: Bot, state: FSMContext):
         await message.answer("❌ Ошибка при добавлении. Убедитесь, что бот получил права.")
 
 
-# ── 3. Обработка ручного пересыла / отправки @username ──────────────────────
+# ── 3. Обработка ручного ввода @username ──────────────────────────────────────
 
 @router.message(ChannelStates.waiting_for_channel)
 async def process_manual_channel(message: Message, state: FSMContext, bot: Bot):
@@ -173,9 +175,7 @@ async def process_manual_channel(message: Message, state: FSMContext, bot: Bot):
         is_new, title, count = await _save_chat(chat_id, message.from_user.id, bot)
         await state.clear()
         
-        from aiogram.types import ReplyKeyboardRemove
         await message.answer("✅", reply_markup=ReplyKeyboardRemove())
-        
         await message.answer(
             f"✅ <b>{title}</b> успешно добавлен!\n"
             f"👥 Участников: <b>{count:,}</b>\n\n"
@@ -191,6 +191,5 @@ async def process_manual_channel(message: Message, state: FSMContext, bot: Bot):
 @router.message(Command("cancel"), ChannelStates.waiting_for_channel)
 async def cancel_channel(message: Message, state: FSMContext):
     await state.clear()
-    from aiogram.types import ReplyKeyboardRemove
     await message.answer("❌ Добавление отменено.", reply_markup=ReplyKeyboardRemove())
-    await message.answer("Вернуться:", reply_markup=_back_kb())
+    await message.answer("Вернуться в приложение:", reply_markup=_back_kb())
