@@ -15,9 +15,11 @@ interface Template {
 
 export default function TemplatesPage() {
   const { initData, haptic } = useTelegram();
-  const [templates, setTemplates] = useState<Template[]>([]);
+  const[templates, setTemplates] = useState<Template[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  
+  const [botUsername, setBotUsername] = useState<string>('');
 
   useEffect(() => {
     if (!initData) return;
@@ -28,11 +30,23 @@ export default function TemplatesPage() {
       .then(d => setTemplates(d.templates ??[]))
       .catch(console.error)
       .finally(() => setIsLoading(false));
+
+    fetch(`${API}/bot-info`, {
+      headers: { 'Authorization': `Bearer ${initData}` }
+    })
+      .then(r => r.json())
+      .then(d => { if (d.username) setBotUsername(d.username); })
+      .catch(console.error);
   }, [initData]);
 
   const handleAdd = () => {
     const tg = window.Telegram?.WebApp;
     if (!tg) return;
+
+    if (!botUsername) {
+      tg.showAlert("Бот еще загружается, подождите секунду...");
+      return;
+    }
 
     haptic?.impactOccurred('medium');
     
@@ -43,22 +57,9 @@ export default function TemplatesPage() {
         { id: 'cancel', type: 'cancel', text: 'Отмена' },
         { id: 'ok', type: 'default', text: 'ОК' }
       ]
-    }, async (buttonId: string) => {
+    }, (buttonId: string) => {
       if (buttonId === 'ok') {
-        try {
-          const res = await fetch(`${API}/bot-info`, {
-            headers: { 'Authorization': `Bearer ${initData}` }
-          });
-          const data = await res.json();
-          
-          if (data.username) {
-            // Открываем бота с командой newpost и закрываем апп
-            tg.openTelegramLink(`https://t.me/${data.username}?start=newpost`);
-            tg.close();
-          }
-        } catch (error) {
-          tg.showAlert('Не удалось связаться с сервером.');
-        }
+        tg.openTelegramLink(`https://t.me/${botUsername}?start=newpost`);
       }
     });
   };

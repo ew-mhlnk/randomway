@@ -15,11 +15,10 @@ interface Channel {
 }
 
 function Avatar({ channel, initData }: { channel: Channel; initData: string }) {
-  const [err, setErr] = useState(false);
+  const[err, setErr] = useState(false);
   const colors =['#1A8CFF', '#E020C0', '#2ECC71', '#E74C3C', '#F39C12'];
   
   if (channel.has_photo && !err) {
-    // Для картинок оставляем query-параметр, так как тег <img> не умеет отправлять заголовки
     return (
       <img
         src={`${API}/channels/${channel.id}/photo?initData=${encodeURIComponent(initData)}`}
@@ -39,12 +38,17 @@ function Avatar({ channel, initData }: { channel: Channel; initData: string }) {
 
 export default function ChannelsPage() {
   const { initData, haptic } = useTelegram();
-  const[channels, setChannels] = useState<Channel[]>([]);
+  const [channels, setChannels] = useState<Channel[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const[deletingId, setDeletingId] = useState<number | null>(null);
+  
+  // Загружаем юзернейм бота заранее!
+  const [botUsername, setBotUsername] = useState<string>('');
 
   useEffect(() => {
     if (!initData) return;
+    
+    // Запрашиваем каналы
     fetch(`${API}/channels`, {
       headers: { 'Authorization': `Bearer ${initData}` }
     })
@@ -52,11 +56,25 @@ export default function ChannelsPage() {
       .then(d => setChannels(d.channels ??[]))
       .catch(console.error)
       .finally(() => setIsLoading(false));
+
+    // СРАЗУ запрашиваем юзернейм бота
+    fetch(`${API}/bot-info`, {
+      headers: { 'Authorization': `Bearer ${initData}` }
+    })
+      .then(r => r.json())
+      .then(d => { if (d.username) setBotUsername(d.username); })
+      .catch(console.error);
+      
   }, [initData]);
 
   const handleAdd = () => {
     const tg = window.Telegram?.WebApp;
     if (!tg) return;
+
+    if (!botUsername) {
+      tg.showAlert("Бот еще загружается, подождите секунду...");
+      return;
+    }
 
     haptic?.impactOccurred('medium');
     
@@ -67,23 +85,11 @@ export default function ChannelsPage() {
         { id: 'cancel', type: 'cancel', text: 'Отмена' },
         { id: 'ok', type: 'default', text: 'ОК' }
       ]
-    }, async (buttonId: string) => {
+    }, (buttonId: string) => {
       if (buttonId === 'ok') {
-        try {
-          // Динамически получаем юзернейм бота с бэкенда
-          const res = await fetch(`${API}/bot-info`, {
-            headers: { 'Authorization': `Bearer ${initData}` }
-          });
-          const data = await res.json();
-          
-          if (data.username) {
-            // Открываем бота с командой и сворачиваем мини-апп
-            tg.openTelegramLink(`https://t.me/${data.username}?start=newchannel`);
-            tg.close();
-          }
-        } catch (error) {
-          tg.showAlert('Не удалось связаться с сервером.');
-        }
+        // Мгновенный редирект в бота без лишних задержек.
+        // openTelegramLink автоматически сворачивает мини-апп. Не используем tg.close()!
+        tg.openTelegramLink(`https://t.me/${botUsername}?start=newchannel`);
       }
     });
   };

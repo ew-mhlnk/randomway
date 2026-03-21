@@ -26,10 +26,10 @@ def _back_kb() -> InlineKeyboardMarkup:
     ]])
 
 
-# ── Единая точка входа: команда /newpost ИЛИ диплинк из Mini App ────────────
+# ── 1. Ловим команду /newpost ИЛИ диплинк из Mini App ───────────────────────
 
 @router.message(Command("newpost"))
-@router.message(CommandStart(deep_link=True), F.text.contains("newpost"))
+@router.message(CommandStart(deep_link=True, magic=F.args == "newpost"))
 async def cmd_new_post(message: Message, state: FSMContext):
     await state.set_state(PostStates.waiting_for_post)
     await message.answer(
@@ -40,7 +40,7 @@ async def cmd_new_post(message: Message, state: FSMContext):
     )
 
 
-# ── Приём медиа/текста ──────────────────────────────────────────────────────
+# ── 2. Приём медиа/текста ───────────────────────────────────────────────────
 
 @router.message(PostStates.waiting_for_post)
 async def receive_post_content(message: Message, state: FSMContext):
