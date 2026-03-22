@@ -2,8 +2,6 @@ import logging
 import hashlib
 import uvicorn
 import os
-import asyncio
-import socket
 import time
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
@@ -21,9 +19,7 @@ from aiogram.types import (
 )
 from aiogram.filters import CommandStart
 
-# Импорты для сети и хранилища
-import aiohttp
-from aiogram.client.session.aiohttp import AiohttpSession
+# Импорты хранилища
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.storage.redis import RedisStorage
 from redis.asyncio import Redis
@@ -40,11 +36,7 @@ WEBHOOK_URL    = os.getenv("WEBHOOK_URL", "https://api.randomway.pro")
 WEBHOOK_PATH   = "/webhook"
 WEBHOOK_SECRET = hashlib.sha256(BOT_TOKEN.encode()).hexdigest()[:32]
 
-# 🚀 1. ФИКС СЕТИ: Принудительно используем IPv4, чтобы избежать зависаний Docker (IPv6 Blackhole)
-connector = aiohttp.TCPConnector(family=socket.AF_INET)
-session = AiohttpSession(connector=connector)
-
-# 🚀 2. REDIS: С жестким тайм-аутом, чтобы не зависать
+# 🚀 REDIS: С жестким тайм-аутом, чтобы не зависать на 30 секунд
 redis_url = os.getenv("REDIS_URL", "")
 if redis_url and "localhost" not in redis_url:
     try:
@@ -55,10 +47,8 @@ if redis_url and "localhost" not in redis_url:
 else:
     storage = MemoryStorage()
 
-# Подключаем кастомную сессию IPv4 к боту
 bot = Bot(
     token=BOT_TOKEN, 
-    session=session, 
     default=DefaultBotProperties(parse_mode=ParseMode.HTML)
 )
 dp = Dispatcher(storage=storage)
