@@ -26,7 +26,6 @@ class ChannelStates(StatesGroup):
 
 
 def _back_kb() -> InlineKeyboardMarkup:
-    """Кнопка возврата в Mini App"""
     return InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(
             text="🎲 Вернуться в приложение",
@@ -37,43 +36,26 @@ def _back_kb() -> InlineKeyboardMarkup:
 
 def _request_chat_kb() -> ReplyKeyboardMarkup:
     channel_rights = ChatAdministratorRights(
-        is_anonymous=False,
-        can_manage_chat=True,
-        can_post_messages=True,
-        can_edit_messages=True,
-        can_delete_messages=True,
-        can_manage_video_chats=False,
-        can_restrict_members=False,
-        can_promote_members=False,
-        can_change_info=False,
-        can_invite_users=False,
-        can_post_stories=False,
-        can_edit_stories=False,
-        can_delete_stories=False
+        is_anonymous=False, can_manage_chat=True, can_post_messages=True,
+        can_edit_messages=True, can_delete_messages=True,
+        can_manage_video_chats=False, can_restrict_members=False,
+        can_promote_members=False, can_change_info=False,
+        can_invite_users=False, can_post_stories=False,
+        can_edit_stories=False, can_delete_stories=False
     )
-
     group_rights = ChatAdministratorRights(
-        is_anonymous=False,
-        can_manage_chat=True,
-        can_delete_messages=True,
-        can_restrict_members=True,
-        can_invite_users=True,
-        can_pin_messages=True,
-        can_manage_video_chats=False,
-        can_promote_members=False,
-        can_change_info=False,
-        can_post_stories=False,
-        can_edit_stories=False,
-        can_delete_stories=False
+        is_anonymous=False, can_manage_chat=True, can_delete_messages=True,
+        can_restrict_members=True, can_invite_users=True, can_pin_messages=True,
+        can_manage_video_chats=False, can_promote_members=False,
+        can_change_info=False, can_post_stories=False,
+        can_edit_stories=False, can_delete_stories=False
     )
-
     return ReplyKeyboardMarkup(
         keyboard=[[
             KeyboardButton(
                 text="📁 Добавить канал",
                 request_chat=KeyboardButtonRequestChat(
-                    request_id=1,
-                    chat_is_channel=True,
+                    request_id=1, chat_is_channel=True,
                     user_administrator_rights=channel_rights,
                     bot_administrator_rights=channel_rights
                 )
@@ -81,8 +63,7 @@ def _request_chat_kb() -> ReplyKeyboardMarkup:
             KeyboardButton(
                 text="💬 Добавить группу",
                 request_chat=KeyboardButtonRequestChat(
-                    request_id=2,
-                    chat_is_channel=False,
+                    request_id=2, chat_is_channel=False,
                     user_administrator_rights=group_rights,
                     bot_administrator_rights=group_rights
                 )
@@ -93,54 +74,74 @@ def _request_chat_kb() -> ReplyKeyboardMarkup:
     )
 
 
+async def _update_photo_in_background(channel_telegram_id: int, photo_id: str) -> None:
+    """Загружает фото в S3 и обновляет запись в БД. Запускается в фоне."""
+    try:
+        photo_url = await upload_tg_avatar_to_s3(photo_id, channel_telegram_id)
+        if not photo_url:
+            return
+        async with AsyncSessionLocal() as db:
+            channel = await db.scalar(
+                select(Channel).where(Channel.telegram_id == channel_telegram_id)
+            )
+            if channel:
+                channel.photo_url = photo_url
+                await db.commit()
+    except Exception as e:
+        logging.error(f"Background photo update failed for {channel_telegram_id}: {e}")
+
+
 async def _save_chat(chat_id: int, owner_id: int, bot: Bot) -> tuple[bool, str, int]:
+    """
+    Сохраняет канал в БД. Фото НЕ ждём — запускаем загрузку в фоне после коммита.
+    Возвращает (is_new, title, members_count) моментально.
+    """
     chat  = await bot.get_chat(chat_id)
     count = await bot.get_chat_member_count(chat_id)
     photo_id = chat.photo.small_file_id if chat.photo else None
 
-    # 🚀 Загружаем фото в Cloudflare R2
-    photo_url = None
-    if photo_id:
-        photo_url = await upload_tg_avatar_to_s3(photo_id, chat.id)
-
     async with AsyncSessionLocal() as db:
-        existing = await db.scalar(select(Channel).where(Channel.telegram_id == chat.id))
+        existing = await db.scalar(
+            select(Channel).where(Channel.telegram_id == chat.id)
+        )
         if existing:
             existing.title         = chat.title
             existing.username      = getattr(chat, "username", None)
             existing.members_count = count
             existing.photo_file_id = photo_id
-            if photo_url:
-                existing.photo_url = photo_url
             existing.is_active     = True
             existing.owner_id      = owner_id
             await db.commit()
-            return False, chat.title, count
+            is_new = False
+        else:
+            db.add(Channel(
+                telegram_id=chat.id, owner_id=owner_id, title=chat.title,
+                username=getattr(chat, "username", None),
+                members_count=count, photo_file_id=photo_id,
+            ))
+            await db.commit()
+            is_new = True
 
-        db.add(Channel(
-            telegram_id=chat.id, owner_id=owner_id, title=chat.title,
-            username=getattr(chat, "username", None),
-            members_count=count, photo_file_id=photo_id,
-            photo_url=photo_url
-        ))
-        await db.commit()
-        return True, chat.title, count
+    # 🔥 Запускаем загрузку фото в фоне — пользователь уже получит ответ
+    if photo_id:
+        asyncio.create_task(_update_photo_in_background(chat.id, photo_id))
+
+    return is_new, chat.title, count
 
 
 # ── /newchannel ───────────────────────────────────────────────────────────────
 @router.message(Command("newchannel"))
 async def cmd_new_channel(message: Message, state: FSMContext):
     await state.set_state(ChannelStates.waiting_for_channel)
-
-    text = (
+    await message.answer(
         "💬 Пришлите <b>username</b> канала в формате @durov или перешлите сообщение "
         "из канала (например приватного), который вы хотите добавить.\n\n"
         "⚠️ Бот должен быть админом канала с правами на публикацию и редактирование сообщений.\n\n"
         "Для отмены нажмите 👉🏻 /cancel\n\n"
         "🔥 Вы также можете добавить канал с помощью кнопки в меню "
-        "(это удобно - бот сам добавится в админы с нужными правами) 👇🏻"
+        "(это удобно - бот сам добавится в админы с нужными правами) 👇🏻",
+        reply_markup=_request_chat_kb()
     )
-    await message.answer(text, reply_markup=_request_chat_kb())
 
 
 # ── СРАБАТЫВАЕТ, КОГДА ЮЗЕР ВЫБРАЛ КАНАЛ В ОКНЕ ─────────────────────────────
@@ -148,10 +149,21 @@ async def cmd_new_channel(message: Message, state: FSMContext):
 async def on_chat_shared(message: Message, bot: Bot, state: FSMContext):
     chat_id = message.chat_shared.chat_id
 
+    # Убираем клавиатуру сразу — без sleep, без лишних сообщений
     await message.answer("⏳ Проверяем права...", reply_markup=ReplyKeyboardRemove())
-    await asyncio.sleep(0.5)
 
     try:
+        # Проверяем права ДО сохранения — быстро (~100мс)
+        me = await bot.get_me()
+        member = await bot.get_chat_member(chat_id=chat_id, user_id=me.id)
+        if member.status != "administrator":
+            await message.answer(
+                "❌ Бот ещё не администратор в этом канале.\n"
+                "Сделайте его админом или используйте кнопки меню ниже 👇",
+                reply_markup=_request_chat_kb()
+            )
+            return
+
         chat = await bot.get_chat(chat_id)
         is_new, title, count = await _save_chat(chat.id, message.from_user.id, bot)
         kind = "Канал" if chat.type == "channel" else "Группа"
