@@ -17,24 +17,39 @@ interface Channel {
 
 function Avatar({ channel }: { channel: Channel }) {
   const [err, setErr] = useState(false);
-  const colors = ['#1A8CFF', '#E020C0', '#2ECC71', '#E74C3C', '#F39C12'];
 
+  // Красивые премиум-градиенты для каналов без фото
+  const gradients = [
+    'linear-gradient(135deg, #FF9A9E 0%, #FECFEF 100%)',
+    'linear-gradient(135deg, #a18cd1 0%, #fbc2eb 100%)',
+    'linear-gradient(135deg, #84fab0 0%, #8fd3f4 100%)',
+    'linear-gradient(135deg, #fccb90 0%, #d57eeb 100%)',
+    'linear-gradient(135deg, #e0c3fc 0%, #8ec5fc 100%)',
+  ];
+
+  // Выбираем цвет на основе ID канала (чтобы цвет всегда был одинаковым для одного канала)
+  const bg = gradients[Math.abs(channel.id) % gradients.length];
+
+  // Если у канала ЕСТЬ фото, и оно НЕ выдало ошибку загрузки
   if (channel.has_photo && channel.photo_url && !err) {
     return (
       <img
         src={channel.photo_url}
         alt={channel.title}
-        onError={() => setErr(true)}
-        className="w-11 h-11 rounded-full object-cover shrink-0"
+        onError={() => setErr(true)} // Если ссылка битая - сразу переключится на градиент
+        className="w-11 h-11 rounded-full object-cover shrink-0 shadow-sm"
       />
     );
   }
+
+  // ФОЛБЭК: Если фото нет или произошла ошибка загрузки
   return (
     <div
-      className="w-11 h-11 rounded-full flex items-center justify-center text-white font-bold text-lg shrink-0"
-      style={{ background: colors[channel.id % colors.length] }}
+      className="w-11 h-11 rounded-full flex items-center justify-center text-white font-bold text-[18px] shrink-0 shadow-sm"
+      style={{ background: bg, textShadow: '0 1px 2px rgba(0,0,0,0.1)' }}
     >
-      {channel.title[0].toUpperCase()}
+      {/* Берем первую букву названия канала */}
+      {channel.title ? channel.title[0].toUpperCase() : 'C'}
     </div>
   );
 }

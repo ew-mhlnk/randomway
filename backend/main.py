@@ -7,7 +7,7 @@ import os
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -117,7 +117,7 @@ app.include_router(api_router)
 
 
 @app.post(WEBHOOK_PATH)
-async def telegram_webhook(request: Request):
+async def telegram_webhook(request: Request, bg_tasks: BackgroundTasks):
     secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
     if secret != WEBHOOK_SECRET:
         raise HTTPException(status_code=403, detail="Invalid secret")
@@ -125,10 +125,9 @@ async def telegram_webhook(request: Request):
     update_data = await request.json()
     update = Update.model_validate(update_data)
 
-    try:
-        await dp.feed_update(bot, update)
-    except Exception as e:
-        logging.error(f"Ошибка при обработке апдейта {update.update_id}: {e}")
+    # 🔥 Отправляем тяжелую задачу (скачивание, базу, права) в фоновый режим.
+    # Бот теперь всегда будет отвечать моментально!
+    bg_tasks.add_task(dp.feed_update, bot, update)
 
     return JSONResponse({"ok": True})
 
