@@ -3,6 +3,8 @@ import hashlib
 import uvicorn
 import os
 import asyncio
+import socket
+import time
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 
@@ -18,6 +20,11 @@ from aiogram.types import (
     WebAppInfo, BotCommand, Update
 )
 from aiogram.filters import CommandStart
+
+# Импорты для сети и хранилища
+import aiohttp
+from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.storage.redis import RedisStorage
 from redis.asyncio import Redis
 
@@ -33,16 +40,28 @@ WEBHOOK_URL    = os.getenv("WEBHOOK_URL", "https://api.randomway.pro")
 WEBHOOK_PATH   = "/webhook"
 WEBHOOK_SECRET = hashlib.sha256(BOT_TOKEN.encode()).hexdigest()[:32]
 
-# 🔥 ЖЕСТКИЕ ТАЙМАУТЫ НА REDIS (Fail Fast)
-# Если Coolify не может достучаться до Redis - он упадет через 2 секунды, а не через 30.
-redis_client = Redis.from_url(
-    os.getenv("REDIS_URL", "redis://localhost:6379/0"),
-    socket_connect_timeout=2.0,
-    socket_timeout=5.0
+# 🚀 1. ФИКС СЕТИ: Принудительно используем IPv4, чтобы избежать зависаний Docker (IPv6 Blackhole)
+connector = aiohttp.TCPConnector(family=socket.AF_INET)
+session = AiohttpSession(connector=connector)
+
+# 🚀 2. REDIS: С жестким тайм-аутом, чтобы не зависать
+redis_url = os.getenv("REDIS_URL", "")
+if redis_url and "localhost" not in redis_url:
+    try:
+        redis_client = Redis.from_url(redis_url, socket_connect_timeout=2.0)
+        storage = RedisStorage(redis=redis_client)
+    except Exception:
+        storage = MemoryStorage()
+else:
+    storage = MemoryStorage()
+
+# Подключаем кастомную сессию IPv4 к боту
+bot = Bot(
+    token=BOT_TOKEN, 
+    session=session, 
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
 )
-storage = RedisStorage(redis=redis_client)
-bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-dp  = Dispatcher(storage=storage)
+dp = Dispatcher(storage=storage)
 
 dp.include_router(channels_router)
 dp.include_router(posts_router)
@@ -50,33 +69,28 @@ dp.include_router(posts_router)
 
 @dp.message(CommandStart())
 async def start_default(message: Message):
+    # Замеряем, насколько быстро бот формирует ответ
+    start_time = time.time()
+    
     kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(
-            text="🎲 Открыть RandomWay",
-            web_app=WebAppInfo(url=MINI_APP_URL)
-        )
+        InlineKeyboardButton(text="🎲 Открыть RandomWay", web_app=WebAppInfo(url=MINI_APP_URL))
     ]])
     await message.answer(
         "👋 Привет! Я <b>RandomWay</b> — бот для честных розыгрышей.\n\nОткрыть приложение 👇",
         reply_markup=kb
     )
+    
+    elapsed = time.time() - start_time
+    logging.info(f"⚡ /start обработан и отправлен за {elapsed:.3f} секунд!")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Пингуем Redis при старте сервера. Если он лежит - мы узнаем это сразу в логах деплоя Coolify
-    try:
-        await redis_client.ping()
-        logging.info("✅ Redis connection established!")
-    except Exception as e:
-        logging.error(f"❌ Redis is DOWN or unreachable: {e}")
-
     try:
         info = await bot.get_me()
         os.environ["BOT_USERNAME"] = info.username
         app.state.bot_id = info.id
-    except Exception as e:
-        logging.error(f"get_me failed: {e}")
+    except Exception:
         app.state.bot_id = 0
 
     try:
@@ -92,7 +106,7 @@ async def lifespan(app: FastAPI):
             drop_pending_updates=True,
         )
     except Exception as e:
-        logging.error(f"Telegram API setup failed: {e}")
+        logging.error(f"Webhook setup failed: {e}")
 
     app.state.bot = bot
     app.state.dp  = dp
@@ -102,8 +116,6 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
     await bot.session.close()
-    await redis_client.aclose()
-
 
 app = FastAPI(lifespan=lifespan)
 
@@ -118,12 +130,15 @@ app.add_middleware(
 app.include_router(api_router)
 
 
-# Обертка для фоновых задач, чтобы ошибки не пропадали
+# Обертка для замеров скорости
 async def process_update_safe(update: Update):
+    start_time = time.time()
     try:
         await dp.feed_update(bot, update)
+        elapsed = time.time() - start_time
+        logging.info(f"✅ Апдейт {update.update_id} полностью обработан за {elapsed:.3f} сек.")
     except Exception as e:
-        logging.error(f"Ошибка при обработке вебхука: {e}", exc_info=True)
+        logging.error(f"❌ Ошибка при обработке: {e}", exc_info=True)
 
 
 @app.post(WEBHOOK_PATH)
