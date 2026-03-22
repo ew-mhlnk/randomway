@@ -1,4 +1,4 @@
-"""backend\main.py"""
+"""backend/main.py"""
 
 import logging
 import hashlib
@@ -16,7 +16,7 @@ from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 from aiogram.types import (
     Message, InlineKeyboardMarkup, InlineKeyboardButton,
-    WebAppInfo, BotCommand, Update, ReplyKeyboardRemove
+    WebAppInfo, BotCommand, Update
 )
 from aiogram.filters import CommandStart
 from aiogram.fsm.storage.redis import RedisStorage
@@ -39,7 +39,6 @@ storage = RedisStorage(redis=redis_client)
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp  = Dispatcher(storage=storage)
 
-# Подключаем роутеры
 dp.include_router(channels_router)
 dp.include_router(posts_router)
 
@@ -52,11 +51,11 @@ async def start_default(message: Message):
             web_app=WebAppInfo(url=MINI_APP_URL)
         )
     ]])
+    # Одно сообщение вместо двух — вдвое быстрее (один HTTP-запрос к Telegram)
     await message.answer(
-        "👋 Привет! Я <b>RandomWay</b> — бот для честных розыгрышей.",
-        reply_markup=ReplyKeyboardRemove()
+        "👋 Привет! Я <b>RandomWay</b> — бот для честных розыгрышей.\n\nОткрыть приложение 👇",
+        reply_markup=kb
     )
-    await message.answer("Открыть приложение 👇", reply_markup=kb)
 
 
 @asynccontextmanager
@@ -125,8 +124,6 @@ async def telegram_webhook(request: Request, bg_tasks: BackgroundTasks):
     update_data = await request.json()
     update = Update.model_validate(update_data)
 
-    # 🔥 Отправляем тяжелую задачу (скачивание, базу, права) в фоновый режим.
-    # Бот теперь всегда будет отвечать моментально!
     bg_tasks.add_task(dp.feed_update, bot, update)
 
     return JSONResponse({"ok": True})
