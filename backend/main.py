@@ -1,9 +1,8 @@
-"""backend/main.py"""
-
 import logging
 import hashlib
 import uvicorn
 import os
+import asyncio
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 
@@ -34,7 +33,13 @@ WEBHOOK_URL    = os.getenv("WEBHOOK_URL", "https://api.randomway.pro")
 WEBHOOK_PATH   = "/webhook"
 WEBHOOK_SECRET = hashlib.sha256(BOT_TOKEN.encode()).hexdigest()[:32]
 
-redis_client = Redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"))
+# 🔥 ЖЕСТКИЕ ТАЙМАУТЫ НА REDIS (Fail Fast)
+# Если Coolify не может достучаться до Redis - он упадет через 2 секунды, а не через 30.
+redis_client = Redis.from_url(
+    os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+    socket_connect_timeout=2.0,
+    socket_timeout=5.0
+)
 storage = RedisStorage(redis=redis_client)
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp  = Dispatcher(storage=storage)
@@ -51,7 +56,6 @@ async def start_default(message: Message):
             web_app=WebAppInfo(url=MINI_APP_URL)
         )
     ]])
-    # Одно сообщение вместо двух — вдвое быстрее (один HTTP-запрос к Telegram)
     await message.answer(
         "👋 Привет! Я <b>RandomWay</b> — бот для честных розыгрышей.\n\nОткрыть приложение 👇",
         reply_markup=kb
@@ -60,11 +64,17 @@ async def start_default(message: Message):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Пингуем Redis при старте сервера. Если он лежит - мы узнаем это сразу в логах деплоя Coolify
+    try:
+        await redis_client.ping()
+        logging.info("✅ Redis connection established!")
+    except Exception as e:
+        logging.error(f"❌ Redis is DOWN or unreachable: {e}")
+
     try:
         info = await bot.get_me()
         os.environ["BOT_USERNAME"] = info.username
         app.state.bot_id = info.id
-        logging.info(f"Bot: @{info.username} (id={info.id})")
     except Exception as e:
         logging.error(f"get_me failed: {e}")
         app.state.bot_id = 0
@@ -75,25 +85,18 @@ async def lifespan(app: FastAPI):
             BotCommand(command="newpost",    description="Создать шаблон поста"),
             BotCommand(command="cancel",     description="Отменить текущее действие"),
         ])
-    except Exception as e:
-        logging.error(f"set_my_commands failed: {e}")
-
-    try:
         await bot.set_webhook(
             url=f"{WEBHOOK_URL}{WEBHOOK_PATH}",
             secret_token=WEBHOOK_SECRET,
             allowed_updates=dp.resolve_used_update_types(),
             drop_pending_updates=True,
         )
-        logging.info(f"Webhook: {WEBHOOK_URL}{WEBHOOK_PATH}")
     except Exception as e:
-        logging.error(f"set_webhook failed: {e}")
+        logging.error(f"Telegram API setup failed: {e}")
 
     app.state.bot = bot
     app.state.dp  = dp
-
     yield
-
     try:
         await bot.delete_webhook(drop_pending_updates=True)
     except Exception:
@@ -106,13 +109,21 @@ app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://randomway.pro", "http://localhost:3000"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 app.include_router(api_router)
+
+
+# Обертка для фоновых задач, чтобы ошибки не пропадали
+async def process_update_safe(update: Update):
+    try:
+        await dp.feed_update(bot, update)
+    except Exception as e:
+        logging.error(f"Ошибка при обработке вебхука: {e}", exc_info=True)
 
 
 @app.post(WEBHOOK_PATH)
@@ -124,12 +135,10 @@ async def telegram_webhook(request: Request, bg_tasks: BackgroundTasks):
     update_data = await request.json()
     update = Update.model_validate(update_data)
 
-    bg_tasks.add_task(dp.feed_update, bot, update)
-
+    bg_tasks.add_task(process_update_safe, update)
     return JSONResponse({"ok": True})
 
 
-@app.get("/")
 @app.get("/health")
 async def health():
     return {"status": "ok"}
