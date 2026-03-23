@@ -1,6 +1,6 @@
 """backend\api.py"""
 
-from fastapi import APIRouter, HTTPException, Depends, Response, Request
+from fastapi import APIRouter, HTTPException, Depends, Response, Request, BackgroundTasks
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 import urllib.parse
@@ -10,16 +10,20 @@ import json
 import os
 import time
 import re
+import asyncio
+from datetime import datetime
+from typing import Optional, List
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.dialects.postgresql import insert
 from aiogram.exceptions import TelegramBadRequest
+from aiogram import Bot
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from aiogram.fsm.storage.base import StorageKey
 
-from database import get_db
-from models import User, Channel, PostTemplate
+from database import get_db, AsyncSessionLocal
+from models import User, Channel, PostTemplate, Giveaway
 from services.giveaway_service import giveaway_service
 
 router = APIRouter()
@@ -76,11 +80,23 @@ def strip_html_tags(text: str) -> str:
 class AuthRequest(BaseModel):
     initData: str
 
-class GiveawayCreateRequest(BaseModel):
+class GiveawayPublishSchema(BaseModel):
     title: str
-    type: str
-    template_id: str
+    template_id: int
+    button_text: str
+    button_emoji: str
+    sponsor_channels: List[int]
+    publish_channels: List[int]
+    result_channels: List[int]
+    start_immediately: bool
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
     winners_count: int
+    use_boosts: bool
+    use_invites: bool
+    max_invites: int
+    use_stories: bool
+    use_captcha: bool
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
@@ -194,7 +210,6 @@ async def sync_channel(channel_id: int, request: Request, user_id: int = Depends
         count = await bot.get_chat_member_count(ch.telegram_id)
         photo_id = chat.photo.small_file_id if chat.photo else None
 
-        # Обновляем фото в облаке только если оно изменилось
         if photo_id and photo_id != ch.photo_file_id:
             new_url = await upload_tg_avatar_to_s3(photo_id, chat.id)
             if new_url: ch.photo_url = new_url
@@ -248,12 +263,123 @@ async def delete_template(template_id: int, user_id: int = Depends(get_user_id),
     await db.commit()
     return {"status": "success"}
 
-# ── Giveaways ─────────────────────────────────────────────────────────────────
+# =====================================================================
+# ФОНОВАЯ ЗАДАЧА ДЛЯ РАССЫЛКИ ПОСТОВ
+# =====================================================================
+async def post_to_channels_background_task(giveaway_id: int, bot: Bot):
+    """Рассылает пост по каналам в фоновом режиме (чтобы не блокировать ответ юзеру)"""
+    import logging
+    logging.info(f"🚀 Запуск фоновой публикации для розыгрыша #{giveaway_id}")
+    
+    # Так как задача фоновая, текущая сессия БД (Depends(get_db)) уже закрыта. 
+    # Создаем новую независимую сессию!
+    async with AsyncSessionLocal() as db:
+        # 1. Получаем сам розыгрыш
+        giveaway = await db.scalar(select(Giveaway).where(Giveaway.id == giveaway_id))
+        if not giveaway: return
+            
+        # 2. Получаем шаблон поста
+        template = await db.scalar(select(PostTemplate).where(PostTemplate.id == giveaway.template_id))
+        if not template: return
+            
+        # 3. Получаем реальные каналы из базы (чтобы узнать их telegram_id)
+        # giveaway.publish_channel_ids - это массив наших внутренних ID [1, 5, 8]
+        channels_result = await db.execute(
+            select(Channel).where(Channel.id.in_(giveaway.publish_channel_ids))
+        )
+        channels = channels_result.scalars().all()
+        
+        # 4. Формируем кнопку-ссылку для участия (ОТКРЫВАЕТ MINI APP)
+        bot_info = await bot.get_me()
+        
+        # Название твоего Mini App (Short Name), которое ты задавала в BotFather.
+        # Если у тебя ссылка вида https://t.me/RandomWayBot/app, то short_name = "app"
+        app_short_name = os.getenv("MINI_APP_SHORT_NAME", "app") 
+        
+        # Специальная ссылка, которая откроет Mini App поверх канала и передаст ID розыгрыша (gw_5)
+        giveaway_url = f"https://t.me/{bot_info.username}/{app_short_name}?startapp=gw_{giveaway.id}"
+        
+        # Собираем красивую кнопку (Эмодзи + Текст)
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(
+                text=f"{giveaway.button_color_emoji} {giveaway.button_text}",
+                url=giveaway_url
+            )
+        ]])
+        
+        # 5. Рассылаем по всем выбранным каналам
+        for channel in channels:
+            try:
+                if template.media_type == "photo":
+                    await bot.send_photo(chat_id=channel.telegram_id, photo=template.media_id, caption=template.text, reply_markup=kb)
+                elif template.media_type == "video":
+                    await bot.send_video(chat_id=channel.telegram_id, video=template.media_id, caption=template.text, reply_markup=kb)
+                elif template.media_type == "animation":
+                    await bot.send_animation(chat_id=channel.telegram_id, animation=template.media_id, caption=template.text, reply_markup=kb)
+                else:
+                    await bot.send_message(chat_id=channel.telegram_id, text=template.text, reply_markup=kb)
+                
+                logging.info(f"✅ Успешно опубликовано в {channel.title}")
+                
+                # Защита от спама (Telegram API разрешает не более 30 сообщений в секунду)
+                await asyncio.sleep(0.5) 
+                
+            except Exception as e:
+                logging.error(f"❌ Ошибка публикации в {channel.title} (ID: {channel.telegram_id}): {e}")
+                # TODO: Если ошибка (например, бот удален из админов), можно отправить создателю уведомление
 
-@router.post("/giveaways")
-async def create_giveaway(request_data: GiveawayCreateRequest, user_id: int = Depends(get_user_id), db: AsyncSession = Depends(get_db)):
+
+# =====================================================================
+# ЭНДПОИНТ ПУБЛИКАЦИИ
+# =====================================================================
+@router.post("/giveaways/publish")
+async def publish_giveaway(
+    data: GiveawayPublishSchema, 
+    request: Request, # ➕ Добавили request, чтобы получить бота
+    bg_tasks: BackgroundTasks,
+    user_id: int = Depends(get_user_id),
+    db: AsyncSession = Depends(get_db)
+):
     try:
-        g = await giveaway_service.create_draft(db, user_id, request_data.model_dump())
-        return {"status": "success", "giveaway_id": g.id}
+        if not data.start_immediately and not data.start_date:
+            raise HTTPException(status_code=400, detail="Укажите дату начала")
+        
+        # 1. Сохраняем в БД
+        giveaway = Giveaway(
+            creator_id=user_id,
+            title=data.title,
+            template_id=data.template_id,
+            button_text=data.button_text,
+            button_color_emoji=data.button_emoji,
+            sponsor_channel_ids=data.sponsor_channels,
+            publish_channel_ids=data.publish_channels,
+            result_channel_ids=data.result_channels,
+            start_immediately=data.start_immediately,
+            start_date=data.start_date,
+            end_date=data.end_date,
+            winners_count=data.winners_count,
+            use_boosts=data.use_boosts,
+            use_invites=data.use_invites,
+            max_invites=data.max_invites,
+            use_stories=data.use_stories,
+            use_captcha=data.use_captcha,
+            status="active" if data.start_immediately else "pending"
+        )
+        
+        db.add(giveaway)
+        await db.commit()
+        await db.refresh(giveaway)
+
+        # 2. Если нужно запустить сразу - кидаем задачу в фон!
+        if data.start_immediately:
+            bot = request.app.state.bot # Достаем бота из стейта приложения
+            # Передаем бота в фоновую задачу
+            bg_tasks.add_task(post_to_channels_background_task, giveaway.id, bot)
+
+        # 3. Мгновенно отвечаем фронту "Успех"
+        return {"status": "success", "giveaway_id": giveaway.id}
+        
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        import logging
+        logging.error(f"Ошибка создания розыгрыша: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Ошибка при сохранении розыгрыша. Проверьте данные.")
