@@ -16,7 +16,6 @@ venv/
 .venv/
 env/
 .pytest_cache/
-alembic.ini
 
 # === Базы данных и Секреты ===
 *.sqlite3
