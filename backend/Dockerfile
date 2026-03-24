@@ -13,5 +13,5 @@ COPY . .
 # ГОВОРИМ COOLIFY, КАКОЙ ПОРТ ОТКРЫТ (Именно этого не хватало!)
 EXPOSE 8000
 
-# Профессиональный запуск сервера Uvicorn
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--forwarded-allow-ips", "*"]
+# DevOps-подход: сначала накатываем миграции, затем запускаем сервер
+CMD alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000 --forwarded-allow-ips="*"
