@@ -3,6 +3,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
 from datetime import datetime, timezone
 import enum
+import secrets
+import string
 from database import Base
 
 class GiveawayType(str, enum.Enum):
@@ -99,3 +101,33 @@ class Giveaway(Base):
 
     creator = relationship("User", back_populates="giveaways")
     template = relationship("PostTemplate", back_populates="giveaways")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# УЧАСТНИКИ
+# ─────────────────────────────────────────────────────────────────────────────
+
+def generate_ref_code():
+    """Генерирует случайный код из 8 символов для рефералки"""
+    alphabet = string.ascii_letters + string.digits
+    return ''.join(secrets.choice(alphabet) for _ in range(8))
+
+class Participant(Base):
+    __tablename__ = "participants"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    giveaway_id: Mapped[int] = mapped_column(Integer, ForeignKey("giveaways.id"), index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.telegram_id"), index=True)
+    
+    # Реферальная система
+    referral_code: Mapped[str] = mapped_column(String(20), unique=True, index=True, default=generate_ref_code)
+    referred_by: Mapped[str | None] = mapped_column(String(20), nullable=True) # Код того, кто пригласил
+    invite_count: Mapped[int] = mapped_column(Integer, default=0)
+    
+    # Выполнение бонусов
+    has_boosted: Mapped[bool] = mapped_column(Boolean, default=False)
+    story_clicks: Mapped[int] = mapped_column(Integer, default=0)
+    
+    # Финал
+    is_winner: Mapped[bool] = mapped_column(Boolean, default=False)
+    joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

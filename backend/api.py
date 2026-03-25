@@ -17,13 +17,14 @@ from typing import Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import update
 from aiogram.exceptions import TelegramBadRequest
 from aiogram import Bot
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from aiogram.fsm.storage.base import StorageKey
 
 from database import get_db, AsyncSessionLocal
-from models import User, Channel, PostTemplate, Giveaway
+from models import User, Channel, PostTemplate, Giveaway, Participant
 from services.giveaway_service import giveaway_service
 
 router = APIRouter()
@@ -383,3 +384,83 @@ async def publish_giveaway(
         import logging
         logging.error(f"Ошибка создания розыгрыша: {e}", exc_info=True)
         raise HTTPException(status_code=400, detail="Ошибка при сохранении розыгрыша. Проверьте данные.")
+
+
+# =====================================================================
+# УЧАСТИЕ В РОЗЫГРЫШЕ
+# =====================================================================
+@router.post("/giveaways/{giveaway_id}/join")
+async def join_giveaway(
+    giveaway_id: int,
+    request: Request,
+    # Принимаем ref_code, если юзер пришел по чьей-то ссылке
+    payload: dict, 
+    user_id: int = Depends(get_user_id),
+    db: AsyncSession = Depends(get_db)
+):
+    bot = request.app.state.bot
+    ref_code = payload.get("ref_code")
+
+    # 1. Ищем розыгрыш
+    giveaway = await db.scalar(select(Giveaway).where(Giveaway.id == giveaway_id))
+    if not giveaway or giveaway.status != "active":
+        raise HTTPException(status_code=400, detail="Розыгрыш не активен или не найден")
+
+    # 2. Проверяем подписки (АВТОМАТИЧЕСКИ)
+    missing_channels = []
+    
+    if giveaway.sponsor_channel_ids:
+        # Достаем каналы из БД
+        channels = await db.execute(select(Channel).where(Channel.id.in_(giveaway.sponsor_channel_ids)))
+        for ch in channels.scalars().all():
+            try:
+                # Спрашиваем Телеграм: подписан ли юзер?
+                member = await bot.get_chat_member(chat_id=ch.telegram_id, user_id=user_id)
+                if member.status in ["left", "kicked", "banned"]:
+                    # Если не подписан - генерируем или берем ссылку на канал
+                    invite_link = f"https://t.me/{ch.username}" if ch.username else await bot.export_chat_invite_link(ch.telegram_id)
+                    missing_channels.append({"id": ch.id, "title": ch.title, "url": invite_link})
+            except Exception:
+                # Если бот не админ или ошибка сети - прощаем подписку (чтобы не блочить юзера)
+                pass
+
+    # Если есть каналы, на которые юзер не подписан - возвращаем их список фронтенду
+    if missing_channels:
+        return {"status": "missing_subscriptions", "channels": missing_channels}
+
+    # 3. ЮЗЕР ПОДПИСАН НА ВСЁ! Записываем в базу
+    existing = await db.scalar(select(Participant).where(Participant.giveaway_id == giveaway_id, Participant.user_id == user_id))
+    
+    if not existing:
+        # Новый участник
+        participant = Participant(giveaway_id=giveaway_id, user_id=user_id, referred_by=ref_code)
+        db.add(participant)
+        
+        # Если юзер пришел по рефералке - добавляем пригласившему +1
+        if ref_code:
+            await db.execute(
+                update(Participant)
+                .where(Participant.referral_code == ref_code)
+                .values(invite_count=Participant.invite_count + 1)
+            )
+            # В будущем здесь можно отправить сообщение в личку пригласившему (как ты и просила)
+            
+        await db.commit()
+        await db.refresh(participant)
+    else:
+        participant = existing
+
+    # Возвращаем успех и данные для страницы (чтобы показать доп. бонусы)
+    return {
+        "status": "success",
+        "giveaway": {
+            "title": giveaway.title,
+            "use_boosts": giveaway.use_boosts,
+            "use_invites": giveaway.use_invites,
+            "use_stories": giveaway.use_stories
+        },
+        "participant": {
+            "referral_code": participant.referral_code,
+            "invite_count": participant.invite_count
+        }
+    }
