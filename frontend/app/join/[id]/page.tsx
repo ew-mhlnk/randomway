@@ -9,7 +9,7 @@ export default function JoinGiveawayPage({ params }: { params: { id: string } })
   const { initData, haptic } = useTelegram();
   const giveawayId = params.id;
   
-  const[status, setStatus] = useState<'loading' | 'missing' | 'success'>('loading');
+  const [status, setStatus] = useState<'loading' | 'missing' | 'success'>('loading');
   const [missingChannels, setMissingChannels] = useState<any[]>([]);
   const [giveawayData, setGiveawayData] = useState<any>(null);
   const [participantData, setParticipantData] = useState<any>(null);
@@ -19,14 +19,21 @@ export default function JoinGiveawayPage({ params }: { params: { id: string } })
     if (!initData) return;
     setStatus('loading');
     
-    try {
+   try {
+      // Вытаскиваем реферальный код с обходом TypeScript (as any)
+      const startParam = (window.Telegram?.WebApp?.initDataUnsafe as any)?.start_param || '';
+      let refCode = null;
+      if (startParam.includes('_ref_')) {
+        refCode = startParam.split('_ref_')[1];
+      }
+
       const res = await fetch(`${API}/giveaways/${giveawayId}/join`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${initData}` 
         },
-        body: JSON.stringify({ ref_code: null }) // TODO: Достанем из startParam
+        body: JSON.stringify({ ref_code: refCode }) // Передаем реф-код на бэкенд!
       });
       
       const data = await res.json();
@@ -127,12 +134,11 @@ export default function JoinGiveawayPage({ params }: { params: { id: string } })
                     <p className="font-bold text-(--text-primary) text-sm">Пригласить друга</p>
                     <p className="text-xs text-(--text-secondary) mt-1">Приглашено: {participantData.invite_count} (+{participantData.invite_count} шанс)</p>
                   </div>
-  <button 
+<button 
                     onClick={() => {
                       haptic?.selectionChanged();
-                      // Замени YOUR_BOT_USERNAME и YOUR_APP_NAME на свои реальные!
-                      // Например: https://t.me/randomwaybot/randomway?...
-                      const refLink = `https://t.me/YOUR_BOT_USERNAME/YOUR_APP_NAME?startapp=gw_${giveawayId}_ref_${participantData.referral_code}`;
+                      // ТВОЯ РЕАЛЬНАЯ ССЫЛКА (Без заглушек!)
+                      const refLink = `https://t.me/randomwaybot/randomway?startapp=gw_${giveawayId}_ref_${participantData.referral_code}`;
                       navigator.clipboard.writeText(refLink);
                       window.Telegram?.WebApp?.showAlert("Ссылка скопирована!");
                     }}

@@ -1,8 +1,6 @@
-// frontend\app\page.tsx
-
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTelegram } from './providers/TelegramProvider';
 import { motion } from 'framer-motion';
@@ -11,6 +9,18 @@ export default function Dashboard() {
   const { haptic, isLoading } = useTelegram();
   const router = useRouter();
   const [role, setRole] = useState<'participant' | 'creator'>('creator');
+
+  // 🚀 ПЕРЕХВАТЧИК УЧАСТНИКОВ
+  useEffect(() => {
+    const tg = window.Telegram?.WebApp;
+    // Добавили "as any", чтобы TypeScript не ругался на start_param
+    const startParam = (tg?.initDataUnsafe as any)?.start_param; 
+    
+    if (startParam && startParam.startsWith('gw_')) {
+      const giveawayId = startParam.split('_')[1]; 
+      router.replace(`/join/${giveawayId}`);
+    }
+  },[router]);
 
   if (isLoading) return <div className="min-h-screen" />;
 
@@ -56,30 +66,19 @@ export default function Dashboard() {
           </button>
 
           <div className="grid grid-cols-2 gap-4">
-            <button
-              onClick={() => router.push('/channels')}
-              className="glass-card rounded-xl p-5 flex items-center justify-center gap-2 h-24"
-            >
+            <button onClick={() => router.push('/channels')} className="glass-card rounded-xl p-5 flex items-center justify-center gap-2 h-24">
               <span className="text-xl">✍️</span>
-              <span className="text-[16px] font-medium" style={{ color: 'var(--text-primary)' }}>Каналы</span>
+              <span className="text-[16px] font-medium text-(--text-primary)">Каналы</span>
             </button>
-            <button
-              onClick={() => router.push('/templates')}
-              className="glass-card rounded-xl p-5 flex items-center justify-center gap-2 h-24"
-            >
+            <button onClick={() => router.push('/templates')} className="glass-card rounded-xl p-5 flex items-center justify-center gap-2 h-24">
               <span className="text-xl">📝</span>
-              <span className="text-[16px] font-medium" style={{ color: 'var(--text-primary)' }}>Посты</span>
+              <span className="text-[16px] font-medium text-(--text-primary)">Посты</span>
             </button>
           </div>
 
           <button className="glass-card w-full rounded-xl py-5 flex items-center justify-center gap-2">
             <span className="text-xl">🎁</span>
-            <span className="text-[16px] font-medium" style={{ color: 'var(--text-primary)' }}>Розыгрыши</span>
-          </button>
-
-          <button className="glass-card w-full rounded-xl py-5 flex items-center justify-center gap-2">
-            <span className="text-xl">🔢</span>
-            <span className="text-[16px] font-medium" style={{ color: 'var(--text-primary)' }}>Статистика</span>
+            <span className="text-[16px] font-medium text-(--text-primary)">Мои розыгрыши</span>
           </button>
         </div>
       )}
