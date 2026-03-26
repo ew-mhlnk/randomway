@@ -1,14 +1,16 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useParams } from 'next/navigation'; // 🚀 ДОБАВИЛИ ХУК
 import { useTelegram } from '@/app/providers/TelegramProvider';
 
 const API = 'https://api.randomway.pro';
 
-export default function JoinGiveawayPage({ params }: { params: { id: string } }) {
-  const { initData, haptic } = useTelegram();
-  const giveawayId = params.id;
+export default function JoinGiveawayPage() {
+  const params = useParams(); // 🚀 ДОСТАЕМ ПАРАМЕТРЫ ЧЕРЕЗ ХУК
+  const giveawayId = params?.id; 
   
+  const { initData, haptic } = useTelegram();
   const [status, setStatus] = useState<'loading' | 'missing' | 'success'>('loading');
   const [missingChannels, setMissingChannels] = useState<any[]>([]);
   const [giveawayData, setGiveawayData] = useState<any>(null);
@@ -16,10 +18,12 @@ export default function JoinGiveawayPage({ params }: { params: { id: string } })
 
   // 1. АВТОМАТИЧЕСКАЯ ПРОВЕРКА ПРИ ОТКРЫТИИ СТРАНИЦЫ
   const checkParticipation = async () => {
-    if (!initData) return;
+    // 🛡 Защита: не отправляем запрос, если ID еще не подгрузился
+    if (!initData || !giveawayId) return;
+    
     setStatus('loading');
     
-   try {
+    try {
       // Вытаскиваем реферальный код с обходом TypeScript (as any)
       const startParam = (window.Telegram?.WebApp?.initDataUnsafe as any)?.start_param || '';
       let refCode = null;
@@ -55,8 +59,10 @@ export default function JoinGiveawayPage({ params }: { params: { id: string } })
   };
 
   useEffect(() => {
-    checkParticipation();
-  }, [initData]);
+    if (initData && giveawayId) {
+      checkParticipation();
+    }
+  }, [initData, giveawayId]);
 
 
   // ── РЕНДЕР: ЗАГРУЗКА ──
@@ -134,7 +140,7 @@ export default function JoinGiveawayPage({ params }: { params: { id: string } })
                     <p className="font-bold text-(--text-primary) text-sm">Пригласить друга</p>
                     <p className="text-xs text-(--text-secondary) mt-1">Приглашено: {participantData.invite_count} (+{participantData.invite_count} шанс)</p>
                   </div>
-<button 
+                  <button 
                     onClick={() => {
                       haptic?.selectionChanged();
                       // ТВОЯ РЕАЛЬНАЯ ССЫЛКА (Без заглушек!)

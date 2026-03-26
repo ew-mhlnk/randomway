@@ -99,6 +99,9 @@ class GiveawayPublishSchema(BaseModel):
     use_stories: bool
     use_captcha: bool
 
+class JoinGiveawayRequest(BaseModel):
+    ref_code: str | None = None
+
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
 @router.post("/auth")
@@ -393,13 +396,12 @@ async def publish_giveaway(
 async def join_giveaway(
     giveaway_id: int,
     request: Request,
-    # Принимаем ref_code, если юзер пришел по чьей-то ссылке
-    payload: dict, 
+    payload: JoinGiveawayRequest, # 🚀 ИСПОЛЬЗУЕМ СХЕМУ
     user_id: int = Depends(get_user_id),
     db: AsyncSession = Depends(get_db)
 ):
     bot = request.app.state.bot
-    ref_code = payload.get("ref_code")
+    ref_code = payload.ref_code # 🚀 ТЕПЕРЬ ОБРАЩАЕМСЯ ЧЕРЕЗ ТОЧКУ
 
     # 1. Ищем розыгрыш
     giveaway = await db.scalar(select(Giveaway).where(Giveaway.id == giveaway_id))
