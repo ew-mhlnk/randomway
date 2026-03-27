@@ -1,5 +1,3 @@
-"""backend/main.py"""
-
 import logging
 import hashlib
 import uvicorn
@@ -28,7 +26,7 @@ from redis.asyncio import Redis
 
 from handlers.channels import router as channels_router
 from handlers.posts import router as posts_router
-from api import router as api_router
+from api import api_router
 
 load_dotenv()
 
@@ -109,63 +107,4 @@ async def lifespan(app: FastAPI):
         )
         logging.info(f"✅ Вебхук установлен: {webhook_target}")
     except Exception as e:
-        logging.error(f"❌ Ошибка установки вебхука: {e}")
-
-    app.state.bot = bot
-    app.state.dp  = dp
-
-    yield
-
-    # 🔥 FIX 3: НЕ удаляем вебхук при выключении.
-    # Coolify перезапускает контейнер при деплое — если удалять вебхук,
-    # бот будет "глохнуть" на время между shutdown и следующим startup.
-    await bot.session.close()
-    await redis_client.aclose()
-
-
-app = FastAPI(lifespan=lifespan)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["https://randomway.pro", "http://localhost:3000"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-app.include_router(api_router)
-
-
-async def process_update_safe(update: Update):
-    """Обёртка — ошибки не глотаются молча в фоне."""
-    t = time.monotonic()
-    try:
-        await dp.feed_update(bot, update)
-        logging.info(f"✅ Апдейт {update.update_id} обработан за {(time.monotonic() - t) * 1000:.0f}ms")
-    except Exception as e:
-        logging.error(f"❌ Ошибка апдейта {update.update_id}: {e}", exc_info=True)
-
-
-@app.post(WEBHOOK_PATH)
-async def telegram_webhook(request: Request, bg_tasks: BackgroundTasks):
-    secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
-    if secret != WEBHOOK_SECRET:
-        raise HTTPException(status_code=403, detail="Invalid secret")
-
-    update_data = await request.json()
-    update = Update.model_validate(update_data)
-
-    bg_tasks.add_task(process_update_safe, update)
-
-    return JSONResponse({"ok": True})
-
-
-@app.get("/")
-@app.get("/health")
-async def health():
-    return {"status": "ok"}
-
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+        logging.error

@@ -45,7 +45,7 @@ interface TelegramWebApp {
   exitFullscreen: () => void;
   requestFullscreen: () => void;
   initData: string;
-  initDataUnsafe: { user?: TelegramUser };
+  initDataUnsafe: { user?: TelegramUser; start_param?: string };
   colorScheme: 'light' | 'dark';
   platform: string; // ➕ Добавили platform
   openTelegramLink: (url: string) => void;
@@ -59,6 +59,9 @@ interface TelegramWebApp {
     onClick: (cb: () => void) => void;
     offClick: (cb: () => void) => void;
   };
+  
+  // 🚀 ДОБАВЛЯЕМ НОВЫЙ МЕТОД ДЛЯ СТОРИС СЮДА:
+  shareToStory: (media_url: string, params?: { text?: string }) => void;
 }
 
 declare global {

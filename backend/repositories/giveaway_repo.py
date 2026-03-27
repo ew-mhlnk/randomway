@@ -18,5 +18,13 @@ class GiveawayRepository(BaseRepository[Giveaway]):
         result = await db.execute(stmt)
         return result.scalars().all()
 
+    # 🚀 ДОБАВЛЯЕМ ЭТОТ МЕТОД:
+    async def get_active_by_id(self, db: AsyncSession, giveaway_id: int) -> Giveaway | None:
+        stmt = select(self.model).where(
+            self.model.id == giveaway_id,
+            self.model.status == "active"  # Участник может зайти только в активный розыгрыш
+        )
+        result = await db.execute(stmt)
+        return result.scalar_one_or_none()
 
 giveaway_repo = GiveawayRepository()
