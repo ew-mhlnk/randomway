@@ -1,6 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import update
+from sqlalchemy import update, func # 🚀 ДОБАВИЛИ func
 from models import Participant
 from repositories.base import BaseRepository
 
@@ -21,5 +21,10 @@ class ParticipantRepository(BaseRepository[Participant]):
             .values(invite_count=self.model.invite_count + 1)
         )
         await db.commit()
+
+    # 🚀 НОВЫЙ МЕТОД ДЛЯ ПОДСЧЕТА УЧАСТНИКОВ
+    async def count_by_giveaway(self, db: AsyncSession, giveaway_id: int) -> int:
+        result = await db.execute(select(func.count()).where(self.model.giveaway_id == giveaway_id))
+        return result.scalar() or 0
 
 participant_repo = ParticipantRepository()

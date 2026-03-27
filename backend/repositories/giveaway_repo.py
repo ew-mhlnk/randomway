@@ -1,5 +1,3 @@
-"""backend\repositories\giveaway_repo.py"""
-
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from models import Giveaway
@@ -18,7 +16,15 @@ class GiveawayRepository(BaseRepository[Giveaway]):
         result = await db.execute(stmt)
         return result.scalars().all()
 
-    # 🚀 ДОБАВЛЯЕМ ЭТОТ МЕТОД:
+    # 🚀 НОВЫЙ МЕТОД: ПОЛУЧИТЬ ВСЕ РОЗЫГРЫШИ БЛОГЕРА
+    async def get_all_by_creator(self, db: AsyncSession, creator_id: int) -> list[Giveaway]:
+        result = await db.execute(
+            select(self.model)
+            .where(self.model.creator_id == creator_id)
+            .order_by(self.model.id.desc())  # Сортируем: новые сверху
+        )
+        return list(result.scalars().all())
+
     async def get_active_by_id(self, db: AsyncSession, giveaway_id: int) -> Giveaway | None:
         stmt = select(self.model).where(
             self.model.id == giveaway_id,

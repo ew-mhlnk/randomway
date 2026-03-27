@@ -10,6 +10,9 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database import AsyncSessionLocal
 from models import Giveaway, PostTemplate, Channel
 from repositories.giveaway_repo import giveaway_repo
+# ➕ Добавляем импорт participant_repo
+from repositories.participant_repo import participant_repo
+
 
 class GiveawayService:
     
@@ -87,5 +90,24 @@ class GiveawayService:
             bg_tasks.add_task(self._post_to_channels_task, giveaway.id, bot)
 
         return giveaway.id
+
+    # 🚀 НОВЫЙ МЕТОД (Чистая архитектура)
+    async def get_creator_giveaways(self, db: AsyncSession, user_id: int) -> list[dict]:
+        giveaways = await giveaway_repo.get_all_by_creator(db, user_id)
+        result = []
+        for g in giveaways:
+            # Считаем участников для каждого розыгрыша
+            p_count = await participant_repo.count_by_giveaway(db, g.id)
+            result.append({
+                "id": g.id,
+                "title": g.title,
+                "status": g.status, # 'active', 'pending', 'completed'
+                "participants_count": p_count,
+                "winners_count": g.winners_count,
+                "start_date": g.start_date.isoformat() if g.start_date else None,
+                "end_date": g.end_date.isoformat() if g.end_date else None,
+            })
+        return result
+
 
 giveaway_service = GiveawayService()

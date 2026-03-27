@@ -76,7 +76,10 @@ export default function Dashboard() {
             </button>
           </div>
 
-          <button className="glass-card w-full rounded-xl py-5 flex items-center justify-center gap-2">
+          <button 
+            onClick={() => router.push('/giveaways')} // 🚀 ДОБАВЛЕН ПЕРЕХОД
+            className="glass-card w-full rounded-xl py-5 flex items-center justify-center gap-2"
+          >
             <span className="text-xl">🎁</span>
             <span className="text-[16px] font-medium text-(--text-primary)">Мои розыгрыши</span>
           </button>

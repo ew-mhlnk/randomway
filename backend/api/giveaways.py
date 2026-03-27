@@ -20,3 +20,12 @@ async def publish_giveaway(
         db=db, bot=bot, user_id=user_id, data=data.model_dump(), bg_tasks=bg_tasks
     )
     return {"status": "success", "giveaway_id": giveaway_id}
+
+# 🚀 НОВЫЙ ЭНДПОИНТ: Список розыгрышей
+@router.get("/giveaways")
+async def list_giveaways(
+    user_id: int = Depends(get_user_id),
+    db: AsyncSession = Depends(get_db)
+):
+    giveaways = await giveaway_service.get_creator_giveaways(db, user_id)
+    return {"giveaways": giveaways}
