@@ -29,3 +29,24 @@ async def list_giveaways(
 ):
     giveaways = await giveaway_service.get_creator_giveaways(db, user_id)
     return {"giveaways": giveaways}
+
+# 🚀 ЗАПУСК ПОДВЕДЕНИЯ ИТОГОВ
+@router.post("/giveaways/{giveaway_id}/finalize")
+async def finalize_giveaway_endpoint(
+    giveaway_id: int,
+    request: Request,
+    bg_tasks: BackgroundTasks,
+    user_id: int = Depends(get_user_id),
+    db: AsyncSession = Depends(get_db)
+):
+    bot = request.app.state.bot
+    return await giveaway_service.finalize_giveaway(db, bot, giveaway_id, user_id, bg_tasks)
+
+# 🚀 ПРОВЕРКА СТАТУСА (ДЛЯ ПОЛЛИНГА)
+@router.get("/giveaways/{giveaway_id}/status")
+async def get_giveaway_status(
+    giveaway_id: int,
+    user_id: int = Depends(get_user_id),
+    db: AsyncSession = Depends(get_db)
+):
+    return await giveaway_service.get_giveaway_status(db, giveaway_id)

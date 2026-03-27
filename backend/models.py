@@ -130,4 +130,6 @@ class Participant(Base):
     
     # Финал
     is_winner: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 🚀 НОВОЕ ПОЛЕ: Флаг для тех, кто отписался (хитрецы)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True) 
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

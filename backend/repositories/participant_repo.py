@@ -1,6 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import update, func # 🚀 ДОБАВИЛИ func
+from sqlalchemy import update, func
 from models import Participant
 from repositories.base import BaseRepository
 
@@ -26,5 +26,20 @@ class ParticipantRepository(BaseRepository[Participant]):
     async def count_by_giveaway(self, db: AsyncSession, giveaway_id: int) -> int:
         result = await db.execute(select(func.count()).where(self.model.giveaway_id == giveaway_id))
         return result.scalar() or 0
+
+    # Получить всех участников конкретного розыгрыша
+    async def get_all_by_giveaway(self, db: AsyncSession, giveaway_id: int) -> list[Participant]:
+        result = await db.execute(select(self.model).where(self.model.giveaway_id == giveaway_id))
+        return list(result.scalars().all())
+
+    # Получить победителей вместе с их юзернеймами (JOIN с таблицей User)
+    async def get_winners_with_users(self, db: AsyncSession, giveaway_id: int):
+        from models import User # Локальный импорт
+        result = await db.execute(
+            select(self.model, User)
+            .join(User, self.model.user_id == User.telegram_id)
+            .where(self.model.giveaway_id == giveaway_id, self.model.is_winner == True)
+        )
+        return result.all() # Вернет список кортежей (Participant, User)
 
 participant_repo = ParticipantRepository()

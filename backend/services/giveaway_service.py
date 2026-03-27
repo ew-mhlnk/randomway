@@ -1,70 +1,24 @@
-import os
-import asyncio
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 from fastapi import HTTPException
-from aiogram import Bot
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from database import AsyncSessionLocal
-from models import Giveaway, PostTemplate, Channel
 from repositories.giveaway_repo import giveaway_repo
-# ➕ Добавляем импорт participant_repo
 from repositories.participant_repo import participant_repo
-
+# Импортируем Celery задачи (они будут созданы в worker.py или tasks.py)
+# Важно: импортировать нужно функцию задачи, которую мы вызовем через .delay()
+from tasks import publish_giveaway_task, finalize_giveaway_task
 
 class GiveawayService:
     
-    # 1. Фоновая задача для рассылки
-    async def _post_to_channels_task(self, giveaway_id: int, bot: Bot):
-        logging.info(f"🚀 Запуск фоновой публикации для розыгрыша #{giveaway_id}")
-        
-        async with AsyncSessionLocal() as db:
-            giveaway = await db.scalar(select(Giveaway).where(Giveaway.id == giveaway_id))
-            if not giveaway: return
-                
-            template = await db.scalar(select(PostTemplate).where(PostTemplate.id == giveaway.template_id))
-            if not template: return
-                
-            channels_result = await db.execute(select(Channel).where(Channel.id.in_(giveaway.publish_channel_ids)))
-            channels = channels_result.scalars().all()
-            
-            bot_info = await bot.get_me()
-            app_short_name = os.getenv("MINI_APP_SHORT_NAME", "app") 
-            giveaway_url = f"https://t.me/{bot_info.username}/{app_short_name}?startapp=gw_{giveaway.id}"
-            
-            kb = InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(
-                    text=f"{giveaway.button_color_emoji} {giveaway.button_text}",
-                    url=giveaway_url
-                )
-            ]])
-            
-            for channel in channels:
-                try:
-                    if template.media_type == "photo":
-                        await bot.send_photo(chat_id=channel.telegram_id, photo=template.media_id, caption=template.text, reply_markup=kb)
-                    elif template.media_type == "video":
-                        await bot.send_video(chat_id=channel.telegram_id, video=template.media_id, caption=template.text, reply_markup=kb)
-                    elif template.media_type == "animation":
-                        await bot.send_animation(chat_id=channel.telegram_id, animation=template.media_id, caption=template.text, reply_markup=kb)
-                    else:
-                        await bot.send_message(chat_id=channel.telegram_id, text=template.text, reply_markup=kb)
-                    
-                    logging.info(f"✅ Успешно опубликовано в {channel.title}")
-                    await asyncio.sleep(0.5) # Защита от спама (Rate Limit)
-                    
-                except Exception as e:
-                    logging.error(f"❌ Ошибка публикации в {channel.title}: {e}")
-
-
     # 2. Основной метод публикации
-    async def publish_giveaway(self, db: AsyncSession, bot: Bot, user_id: int, data: dict, bg_tasks) -> int:
+    async def publish_giveaway(self, db: AsyncSession, user_id: int, data: dict) -> int:
+        """
+        Создает розыгрыш и, если нужно, ставит задачу на публикацию в очередь Celery.
+        """
         if not data.get('start_immediately') and not data.get('start_date'):
             raise HTTPException(status_code=400, detail="Укажите дату начала")
         
-        # Создаем через репозиторий
+        # Создаем розыгрыш через репозиторий
         giveaway = await giveaway_repo.create(db, obj_in_data={
             "creator_id": user_id,
             "title": data['title'],
@@ -86,28 +40,59 @@ class GiveawayService:
             "status": "active" if data['start_immediately'] else "pending"
         })
 
+        # Если старт немедленный — отправляем задачу в Celery
         if data['start_immediately']:
-            bg_tasks.add_task(self._post_to_channels_task, giveaway.id, bot)
+            # .delay() ставит задачу в очередь Redis
+            publish_giveaway_task.delay(giveaway.id)
+            logging.info(f"📦 Задача на публикацию #{giveaway.id} поставлена в очередь")
 
         return giveaway.id
 
-    # 🚀 НОВЫЙ МЕТОД (Чистая архитектура)
+    # Метод для получения списка розыгрышей создателя
     async def get_creator_giveaways(self, db: AsyncSession, user_id: int) -> list[dict]:
         giveaways = await giveaway_repo.get_all_by_creator(db, user_id)
         result = []
         for g in giveaways:
-            # Считаем участников для каждого розыгрыша
             p_count = await participant_repo.count_by_giveaway(db, g.id)
             result.append({
                 "id": g.id,
                 "title": g.title,
-                "status": g.status, # 'active', 'pending', 'completed'
+                "status": g.status,
                 "participants_count": p_count,
                 "winners_count": g.winners_count,
                 "start_date": g.start_date.isoformat() if g.start_date else None,
                 "end_date": g.end_date.isoformat() if g.end_date else None,
             })
         return result
+
+    # Метод для ручного подведения итогов
+    async def finalize_giveaway(self, db: AsyncSession, giveaway_id: int, user_id: int):
+        """
+        Проверяет права и ставит фоновую задачу подведения итогов в Celery.
+        """
+        giveaway = await giveaway_repo.get_active_by_id(db, giveaway_id)
+        if not giveaway or giveaway.creator_id != user_id:
+            raise HTTPException(status_code=400, detail="Розыгрыш не найден или уже завершен")
+            
+        # Ставим задачу в очередь
+        finalize_giveaway_task.delay(giveaway_id)
+        logging.info(f"📦 Задача на подведение итогов #{giveaway_id} поставлена в очередь")
+        return {"status": "processing"}
+
+    # Метод для поллинга статуса
+    async def get_giveaway_status(self, db: AsyncSession, giveaway_id: int) -> dict:
+        giveaway = await giveaway_repo.get_by_id(db, giveaway_id)
+        if not giveaway: raise HTTPException(status_code=404)
+        
+        winners = []
+        if giveaway.status == "completed":
+            winners_data = await participant_repo.get_winners_with_users(db, giveaway_id)
+            winners = [{"name": u.first_name, "username": u.username} for p, u in winners_data]
+            
+        return {
+            "status": giveaway.status,
+            "winners": winners
+        }
 
 
 giveaway_service = GiveawayService()
