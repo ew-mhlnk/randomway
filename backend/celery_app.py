@@ -6,10 +6,12 @@ load_dotenv()
 
 redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
+# 🚀 ЯВНО УКАЗЫВАЕМ ПУТЬ К ФАЙЛУ С ЗАДАЧАМИ (include)
 celery = Celery(
     "randomway_tasks",
     broker=redis_url,
-    backend=redis_url
+    backend=redis_url,
+    include=["tasks.giveaway_tasks"]
 )
 
 celery.conf.update(
@@ -20,5 +22,4 @@ celery.conf.update(
     enable_utc=True,
 )
 
-# Автоматически находим файлы с задачами
-celery.autodiscover_tasks(["tasks"])
+# Строчку celery.autodiscover_tasks(...) МЫ УДАЛИЛИ
