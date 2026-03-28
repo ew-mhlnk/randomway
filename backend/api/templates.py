@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from api.dependencies import get_user_id
 from database import get_db
-from models import PostTemplate
+from models import PostTemplate, Giveaway
 
 router = APIRouter(tags=["Templates"])
 
@@ -21,8 +21,14 @@ async def get_templates(user_id: int = Depends(get_user_id), db: AsyncSession = 
 
 @router.delete("/templates/{template_id}")
 async def delete_template(template_id: int, user_id: int = Depends(get_user_id), db: AsyncSession = Depends(get_db)):
+    # 🚀 ФИКС: Проверяем, не используется ли этот шаблон в каком-нибудь розыгрыше
+    linked_giveaway = await db.scalar(select(Giveaway).where(Giveaway.template_id == template_id))
+    if linked_giveaway:
+        raise HTTPException(status_code=400, detail="Нельзя удалить: этот шаблон используется в розыгрыше!")
+
     t = await db.scalar(select(PostTemplate).where(PostTemplate.id == template_id, PostTemplate.owner_id == user_id))
     if not t: raise HTTPException(status_code=404)
+    
     await db.delete(t)
     await db.commit()
     return {"status": "success"}
