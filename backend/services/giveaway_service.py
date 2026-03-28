@@ -1,24 +1,154 @@
+import os
+import asyncio
 import logging
+import random
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
 from fastapi import HTTPException
+from aiogram import Bot
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+from database import AsyncSessionLocal
+from models import Giveaway, PostTemplate, Channel
 from repositories.giveaway_repo import giveaway_repo
 from repositories.participant_repo import participant_repo
-# Импортируем Celery задачи (они будут созданы в worker.py или tasks.py)
-# Важно: импортировать нужно функцию задачи, которую мы вызовем через .delay()
-from tasks import publish_giveaway_task, finalize_giveaway_task
+from repositories.channel_repo import channel_repo
+
+# Импортируем сам Celery (без задач!), чтобы отправлять команды
+from celery_app import celery
 
 class GiveawayService:
     
-    # 2. Основной метод публикации
-    async def publish_giveaway(self, db: AsyncSession, user_id: int, data: dict) -> int:
-        """
-        Создает розыгрыш и, если нужно, ставит задачу на публикацию в очередь Celery.
-        """
+    async def _post_to_channels_task(self, giveaway_id: int):
+        logging.info(f"🚀 Фоновая публикация розыгрыша #{giveaway_id}")
+        # Бот создается заново внутри воркера
+        bot = Bot(token=os.getenv("BOT_TOKEN"), default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+        try:
+            async with AsyncSessionLocal() as db:
+                giveaway = await db.scalar(select(Giveaway).where(Giveaway.id == giveaway_id))
+                if not giveaway: return
+                    
+                template = await db.scalar(select(PostTemplate).where(PostTemplate.id == giveaway.template_id))
+                if not template: return
+                    
+                channels_result = await db.execute(select(Channel).where(Channel.id.in_(giveaway.publish_channel_ids)))
+                channels = channels_result.scalars().all()
+                
+                bot_info = await bot.get_me()
+                app_short_name = os.getenv("MINI_APP_SHORT_NAME", "app") 
+                giveaway_url = f"https://t.me/{bot_info.username}/{app_short_name}?startapp=gw_{giveaway.id}"
+                
+                kb = InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(
+                        text=f"{giveaway.button_color_emoji} {giveaway.button_text}",
+                        url=giveaway_url
+                    )
+                ]])
+                
+                for channel in channels:
+                    try:
+                        if template.media_type == "photo":
+                            await bot.send_photo(chat_id=channel.telegram_id, photo=template.media_id, caption=template.text, reply_markup=kb)
+                        elif template.media_type == "video":
+                            await bot.send_video(chat_id=channel.telegram_id, video=template.media_id, caption=template.text, reply_markup=kb)
+                        elif template.media_type == "animation":
+                            await bot.send_animation(chat_id=channel.telegram_id, animation=template.media_id, caption=template.text, reply_markup=kb)
+                        else:
+                            await bot.send_message(chat_id=channel.telegram_id, text=template.text, reply_markup=kb)
+                        
+                        logging.info(f"✅ Успешно опубликовано в {channel.title}")
+                        await asyncio.sleep(0.5)
+                        
+                    except Exception as e:
+                        logging.error(f"❌ Ошибка публикации в {channel.title}: {e}")
+        finally:
+            await bot.session.close()
+
+    async def _finalize_giveaway_task(self, giveaway_id: int):
+        logging.info(f"🎲 Подведение итогов розыгрыша #{giveaway_id}")
+        bot = Bot(token=os.getenv("BOT_TOKEN"), default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+        try:
+            async with AsyncSessionLocal() as db:
+                giveaway = await giveaway_repo.get_active_by_id(db, giveaway_id)
+                if not giveaway: return
+                
+                giveaway.status = "finalizing"
+                await db.commit()
+
+                participants = await participant_repo.get_all_by_giveaway(db, giveaway_id)
+                sponsor_channels = await channel_repo.get_by_ids(db, giveaway.sponsor_channel_ids)
+                
+                valid_participants =[]
+                batch_size = 25
+                
+                for i in range(0, len(participants), batch_size):
+                    batch = participants[i:i+batch_size]
+                    for p in batch:
+                        is_honest = True
+                        for ch in sponsor_channels:
+                            try:
+                                member = await bot.get_chat_member(chat_id=ch.telegram_id, user_id=p.user_id)
+                                if member.status in["left", "kicked", "banned"]:
+                                    is_honest = False
+                                    break
+                            except Exception:
+                                pass
+                                
+                        if is_honest:
+                            valid_participants.append(p)
+                        else:
+                            p.is_active = False 
+                            db.add(p)
+                    
+                    await db.commit()
+                    await asyncio.sleep(1)
+
+                pool =[]
+                for p in valid_participants:
+                    tickets = 1
+                    if p.has_boosted: tickets += 1
+                    tickets += p.invite_count
+                    pool.extend([p.user_id] * tickets)
+                    
+                winners_ids = set()
+                while len(winners_ids) < giveaway.winners_count and pool:
+                    chosen_id = random.choice(pool)
+                    winners_ids.add(chosen_id)
+                    pool = [x for x in pool if x != chosen_id]
+
+                for p in valid_participants:
+                    if p.user_id in winners_ids:
+                        p.is_winner = True
+                        db.add(p)
+                
+                giveaway.status = "completed"
+                await db.commit()
+
+                if giveaway.result_channel_ids:
+                    winners_data = await participant_repo.get_winners_with_users(db, giveaway_id)
+                    winners_text = "\n".join([
+                        f"🏆 {u.first_name}" + (f" (@{u.username})" if u.username else "") 
+                        for p, u in winners_data
+                    ])
+                    
+                    post_text = f"🎉 <b>Итоги розыгрыша «{giveaway.title}» подведены!</b>\n\nПоздравляем победителей:\n{winners_text}\n\n<i>Всего честных участников: {len(valid_participants)}</i>"
+                    
+                    result_channels = await channel_repo.get_by_ids(db, giveaway.result_channel_ids)
+                    for ch in result_channels:
+                        try:
+                            await bot.send_message(chat_id=ch.telegram_id, text=post_text)
+                            await asyncio.sleep(0.5)
+                        except Exception as e:
+                            logging.error(f"Не удалось опубликовать итоги в {ch.title}: {e}")
+        finally:
+            await bot.session.close()
+
+    async def publish_giveaway(self, db: AsyncSession, bot: Bot, user_id: int, data: dict, bg_tasks) -> int:
         if not data.get('start_immediately') and not data.get('start_date'):
             raise HTTPException(status_code=400, detail="Укажите дату начала")
         
-        # Создаем розыгрыш через репозиторий
         giveaway = await giveaway_repo.create(db, obj_in_data={
             "creator_id": user_id,
             "title": data['title'],
@@ -40,18 +170,27 @@ class GiveawayService:
             "status": "active" if data['start_immediately'] else "pending"
         })
 
-        # Если старт немедленный — отправляем задачу в Celery
         if data['start_immediately']:
-            # .delay() ставит задачу в очередь Redis
-            publish_giveaway_task.delay(giveaway.id)
-            logging.info(f"📦 Задача на публикацию #{giveaway.id} поставлена в очередь")
+            # 🚀 CELERY: Отправляем по имени, без импорта самого файла с задачей!
+            celery.send_task("tasks.giveaway_tasks.task_publish_giveaway", args=[giveaway.id])
 
         return giveaway.id
 
-    # Метод для получения списка розыгрышей создателя
+    async def finalize_giveaway(self, db: AsyncSession, bot: Bot, giveaway_id: int, user_id: int, bg_tasks):
+        giveaway = await giveaway_repo.get_active_by_id(db, giveaway_id)
+        if not giveaway or giveaway.creator_id != user_id:
+            raise HTTPException(status_code=400, detail="Розыгрыш не найден или уже завершен")
+            
+        giveaway.status = "finalizing"
+        await db.commit()
+        
+        # 🚀 CELERY: Отправляем задачу в фон
+        celery.send_task("tasks.giveaway_tasks.task_finalize_giveaway", args=[giveaway_id])
+        return {"status": "processing"}
+
     async def get_creator_giveaways(self, db: AsyncSession, user_id: int) -> list[dict]:
         giveaways = await giveaway_repo.get_all_by_creator(db, user_id)
-        result = []
+        result =[]
         for g in giveaways:
             p_count = await participant_repo.count_by_giveaway(db, g.id)
             result.append({
@@ -65,34 +204,18 @@ class GiveawayService:
             })
         return result
 
-    # Метод для ручного подведения итогов
-    async def finalize_giveaway(self, db: AsyncSession, giveaway_id: int, user_id: int):
-        """
-        Проверяет права и ставит фоновую задачу подведения итогов в Celery.
-        """
-        giveaway = await giveaway_repo.get_active_by_id(db, giveaway_id)
-        if not giveaway or giveaway.creator_id != user_id:
-            raise HTTPException(status_code=400, detail="Розыгрыш не найден или уже завершен")
-            
-        # Ставим задачу в очередь
-        finalize_giveaway_task.delay(giveaway_id)
-        logging.info(f"📦 Задача на подведение итогов #{giveaway_id} поставлена в очередь")
-        return {"status": "processing"}
-
-    # Метод для поллинга статуса
     async def get_giveaway_status(self, db: AsyncSession, giveaway_id: int) -> dict:
         giveaway = await giveaway_repo.get_by_id(db, giveaway_id)
         if not giveaway: raise HTTPException(status_code=404)
         
-        winners = []
+        winners =[]
         if giveaway.status == "completed":
             winners_data = await participant_repo.get_winners_with_users(db, giveaway_id)
-            winners = [{"name": u.first_name, "username": u.username} for p, u in winners_data]
+            winners =[{"name": u.first_name, "username": u.username} for p, u in winners_data]
             
         return {
             "status": giveaway.status,
             "winners": winners
         }
-
 
 giveaway_service = GiveawayService()
