@@ -1,6 +1,5 @@
 from fastapi import APIRouter
 
-# Жестко указываем, что берем файлы именно из папки api/
 from api.auth import router as auth_router
 from api.bot_triggers import router as bot_router
 from api.channels import router as channels_router

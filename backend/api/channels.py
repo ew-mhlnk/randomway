@@ -7,6 +7,7 @@ from database import get_db
 from models import Channel
 from services.s3_service import upload_tg_avatar_to_s3
 
+# 🚀 ДОЛЖНО БЫТЬ ИМЕННО ТАК (APIRouter от FastAPI)
 router = APIRouter(tags=["Channels"])
 
 def fmt(count: int | None) -> str:
