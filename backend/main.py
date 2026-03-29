@@ -25,6 +25,9 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from api import api_router
 
+import logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+
 load_dotenv()
 
 BOT_TOKEN      = os.getenv("BOT_TOKEN", "")
