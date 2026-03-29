@@ -1,51 +1,133 @@
 import logging
-from fastapi import APIRouter, Depends, Request, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
+import os
+import asyncio
+
+from aiogram import Router, Bot, F
+from aiogram.types import (
+    Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo,
+    ReplyKeyboardMarkup, KeyboardButton, KeyboardButtonRequestChat,
+    ChatAdministratorRights, ReplyKeyboardRemove
+)
+from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+
 from sqlalchemy.future import select
-from api.dependencies import get_user_id
-from database import get_db
+from database import AsyncSessionLocal
 from models import Channel
 from services.s3_service import upload_tg_avatar_to_s3
 
-router = APIRouter(tags=["Channels"])
+router = Router()
+MINI_APP_URL = os.getenv("MINI_APP_URL", "https://randomway.pro/")
 
-def fmt(count: int | None) -> str:
-    if count is None: return "—"
-    if count >= 1_000_000: return f"{count/1_000_000:.1f}M"
-    if count >= 1_000: return f"{count/1_000:.1f}K"
-    return str(count)
+class ChannelStates(StatesGroup):
+    waiting_for_channel = State()
 
-@router.get("/channels")
-async def get_channels(user_id: int = Depends(get_user_id), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Channel).where(Channel.owner_id == user_id, Channel.is_active == True))
-    channels = result.scalars().all()
-    return {"channels":[{"id": ch.id, "title": ch.title, "username": ch.username, "telegram_id": ch.telegram_id, "members_count": ch.members_count, "members_formatted": fmt(ch.members_count), "has_photo": ch.photo_url is not None, "photo_url": ch.photo_url} for ch in channels]}
+def _back_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🎲 Вернуться в приложение", web_app=WebAppInfo(url=MINI_APP_URL))
+    ]])
 
-@router.post("/channels/{channel_id}/sync")
-async def sync_channel(channel_id: int, request: Request, user_id: int = Depends(get_user_id), db: AsyncSession = Depends(get_db)):
-    bot = request.app.state.bot
-    ch = await db.scalar(select(Channel).where(Channel.id == channel_id, Channel.owner_id == user_id))
-    if not ch: raise HTTPException(status_code=404)
-    try:
-        chat = await bot.get_chat(ch.telegram_id)
-        count = await bot.get_chat_member_count(ch.telegram_id)
-        photo_id = chat.photo.small_file_id if chat.photo else None
-        if photo_id and photo_id != ch.photo_file_id:
-            new_url = await upload_tg_avatar_to_s3(photo_id, chat.id)
-            if new_url: ch.photo_url = new_url
-        ch.title, ch.members_count, ch.photo_file_id = chat.title, count, photo_id
+def _request_chat_kb() -> ReplyKeyboardMarkup:
+    rights = ChatAdministratorRights(
+        is_anonymous=False, can_manage_chat=True, can_post_messages=True,
+        can_edit_messages=True, can_delete_messages=True, can_manage_video_chats=False,
+        can_restrict_members=False, can_promote_members=False, can_change_info=False,
+        can_invite_users=False, can_post_stories=False, can_edit_stories=False, can_delete_stories=False
+    )
+    group_rights = ChatAdministratorRights(
+        is_anonymous=False, can_manage_chat=True, can_delete_messages=True,
+        can_restrict_members=True, can_invite_users=True, can_pin_messages=True,
+        can_manage_video_chats=False, can_promote_members=False, can_change_info=False,
+        can_post_stories=False, can_edit_stories=False, can_delete_stories=False
+    )
+    return ReplyKeyboardMarkup(keyboard=[[
+        KeyboardButton(text="📁 Добавить канал", request_chat=KeyboardButtonRequestChat(request_id=1, chat_is_channel=True, user_administrator_rights=rights, bot_administrator_rights=rights)),
+        KeyboardButton(text="💬 Добавить группу", request_chat=KeyboardButtonRequestChat(request_id=2, chat_is_channel=False, user_administrator_rights=group_rights, bot_administrator_rights=group_rights))
+    ]], resize_keyboard=True, is_persistent=True)
+
+async def _save_chat(chat_id: int, owner_id: int, bot: Bot) -> tuple[bool, str, int]:
+    logging.info(f"💾 Начинаем сохранение чата {chat_id}")
+
+    # Жесткий тайм-аут на запросы к Telegram API (5 секунд)
+    chat = await asyncio.wait_for(bot.get_chat(chat_id), timeout=5.0)
+    count = await asyncio.wait_for(bot.get_chat_member_count(chat_id), timeout=5.0)
+    photo_id = chat.photo.small_file_id if chat.photo else None
+
+    photo_url = None
+    if photo_id:
+        photo_url = await upload_tg_avatar_to_s3(photo_id, chat.id)
+
+    async with AsyncSessionLocal() as db:
+        existing = await db.scalar(select(Channel).where(Channel.telegram_id == chat.id))
+        if existing:
+            existing.title = chat.title
+            existing.username = getattr(chat, "username", None)
+            existing.members_count = count
+            existing.photo_file_id = photo_id
+            if photo_url: existing.photo_url = photo_url
+            existing.is_active = True
+            existing.owner_id = owner_id
+            await db.commit()
+            return False, chat.title, count
+
+        db.add(Channel(
+            telegram_id=chat.id, owner_id=owner_id, title=chat.title,
+            username=getattr(chat, "username", None),
+            members_count=count, photo_file_id=photo_id, photo_url=photo_url
+        ))
         await db.commit()
-    except Exception as e:
-        logging.error(f"Sync error for channel {channel_id}: {e}")
-        raise HTTPException(status_code=400, detail="Бот больше не администратор в этом канале")
-    return {"status": "success"}
+        return True, chat.title, count
 
-@router.delete("/channels/{channel_id}")
-async def delete_channel(channel_id: int, request: Request, user_id: int = Depends(get_user_id), db: AsyncSession = Depends(get_db)):
-    ch = await db.scalar(select(Channel).where(Channel.id == channel_id, Channel.owner_id == user_id))
-    if not ch: raise HTTPException(status_code=404)
-    try: await request.app.state.bot.leave_chat(ch.telegram_id)
-    except: pass
-    await db.delete(ch)
-    await db.commit()
-    return {"status": "success"}
+@router.message(F.chat_shared)
+async def on_chat_shared(message: Message, bot: Bot, state: FSMContext):
+    logging.info("📥 ПОЛУЧЕНО СОБЫТИЕ CHAT_SHARED!")
+    chat_id = message.chat_shared.chat_id
+    await message.answer("⏳ Сохраняем канал...", reply_markup=ReplyKeyboardRemove())
+
+    try:
+        is_new, title, count = await _save_chat(chat_id, message.from_user.id, bot)
+        await state.clear()
+        await message.answer(f"🎉 <b>{title}</b> успешно добавлен!\n👥 Участников: {count:,}\n\nВернитесь в приложение 👇", reply_markup=_back_kb())
+        logging.info("✅ КАНАЛ УСПЕШНО СОХРАНЕН!")
+    except asyncio.TimeoutError:
+        logging.error("❌ ТАЙМ-АУТ TELEGRAM API ПРИ СОХРАНЕНИИ КАНАЛА!")
+        await message.answer("❌ Сервер Telegram не отвечает. Попробуйте еще раз.", reply_markup=_request_chat_kb())
+    except Exception as e:
+        logging.error(f"❌ Ошибка в chat_shared: {e}", exc_info=True)
+        await message.answer("❌ Ошибка при добавлении. Проверьте права бота.", reply_markup=_request_chat_kb())
+
+@router.message(ChannelStates.waiting_for_channel)
+async def process_manual_channel(message: Message, state: FSMContext, bot: Bot):
+    logging.info("📥 ПОЛУЧЕНО РУЧНОЕ СООБЩЕНИЕ ИЛИ ПЕРЕСЫЛКА!")
+    chat_id = None
+    if message.forward_origin and hasattr(message.forward_origin, "chat"):
+        chat_id = message.forward_origin.chat.id
+    elif message.text and message.text.startswith("@"):
+        chat_id = message.text.strip()
+
+    if not chat_id: return
+
+    await message.answer("🔍 Проверяем права...", reply_markup=ReplyKeyboardRemove())
+    try:
+        me = await asyncio.wait_for(bot.get_me(), timeout=5.0)
+        member = await asyncio.wait_for(bot.get_chat_member(chat_id=chat_id, user_id=me.id), timeout=5.0)
+        if member.status != "administrator":
+            await message.answer("❌ Бот ещё не администратор в этом канале.", reply_markup=_request_chat_kb())
+            return
+        is_new, title, count = await _save_chat(chat_id, message.from_user.id, bot)
+        await state.clear()
+        await message.answer(f"🎉 <b>{title}</b> успешно добавлен!\n👥 Участников: {count:,}", reply_markup=_back_kb())
+        logging.info("✅ КАНАЛ УСПЕШНО СОХРАНЕН РУЧНЫМ ВВОДОМ!")
+    except asyncio.TimeoutError:
+        logging.error("❌ ТАЙМ-АУТ TELEGRAM API ПРИ РУЧНОМ ДОБАВЛЕНИИ!")
+        await message.answer("❌ Сервер Telegram не отвечает. Попробуйте еще раз.")
+    except Exception as e:
+        logging.error(f"❌ process_manual error: {e}")
+        await message.answer("❌ Бот не имеет доступа к этому каналу.", reply_markup=_request_chat_kb())
+
+@router.message(Command("cancel"), ChannelStates.waiting_for_channel)
+async def cancel_channel(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer("❌ Добавление отменено.", reply_markup=ReplyKeyboardRemove())
+    await message.answer("Вы можете вернуться в приложение.", reply_markup=_back_kb())
