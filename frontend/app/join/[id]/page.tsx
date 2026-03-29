@@ -42,6 +42,13 @@ export default function JoinGiveawayPage() {
       
       const data = await res.json();
 
+      // 🚀 ДОБАВЛЯЕМ ОБРАБОТКУ ОШИБОК БЭКЕНДА
+      if (!res.ok) {
+        window.Telegram?.WebApp.showAlert(data.detail || "Ошибка участия");
+        setStatus('missing'); // просто чтобы убрать спиннер
+        return;
+      }
+
       if (data.status === 'missing_subscriptions') {
         setMissingChannels(data.channels);
         setStatus('missing');
@@ -55,6 +62,7 @@ export default function JoinGiveawayPage() {
     } catch (e) {
       console.error("Ошибка при проверке:", e);
       window.Telegram?.WebApp.showAlert("Произошла ошибка при проверке подписок.");
+      setStatus('missing'); // Убираем спиннер и показываем интерфейс переповерки
     }
   };
 

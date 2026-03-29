@@ -1,8 +1,16 @@
-// frontend\app\providers\TelegramProvider.tsx
-
 'use client';
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+
+// 🚀 ПРОСТО ОБЪЯВЛЯЕМ API ЗДЕСЬ, ЧТОБЫ TS НЕ ТЕРЯЛ ФАЙЛ
+const API = 'https://api.randomway.pro/api/v1';
+
+interface TelegramUser {
+  id: number;
+  first_name: string;
+  username?: string;
+  language_code?: string;
+}
 
 interface TelegramUser {
   id: number;
@@ -126,7 +134,8 @@ export function TelegramProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!initData) return;
 
-    fetch('https://api.randomway.pro/auth', {
+    // <--- ЗАМЕНА ССЫЛКИ НА КОНСТАНТУ
+    fetch(`${API}/auth`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ initData }),
