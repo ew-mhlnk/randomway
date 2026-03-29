@@ -1,8 +1,8 @@
+"""backend/main.py"""
 import logging
 import hashlib
 import uvicorn
 import os
-import time
 import asyncio
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
@@ -19,15 +19,16 @@ from aiogram.types import (
     WebAppInfo, BotCommand, Update
 )
 from aiogram.filters import CommandStart
-
-# Импорты хранилища
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from api import api_router
 
-import logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+# ── Импортируем ВСЕ aiogram-handlers и регистрируем в dp ────────────────────
+from handlers import channels as channel_handlers
+from handlers import posts as post_handlers
+# from handlers import participants as participant_handlers  # раскомментить когда создашь
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 load_dotenv()
 
 BOT_TOKEN      = os.getenv("BOT_TOKEN", "")
@@ -36,21 +37,28 @@ WEBHOOK_URL    = os.getenv("WEBHOOK_URL", "https://api.randomway.pro")
 WEBHOOK_PATH   = "/webhook"
 WEBHOOK_SECRET = hashlib.sha256(BOT_TOKEN.encode()).hexdigest()[:32]
 
-# 🚀 ФИКС: ПРИНУДИТЕЛЬНО ИСПОЛЬЗУЕМ ПАМЯТЬ.
-# Redis часто вешает диалоги в Docker, мы отрубаем его для FSM.
+# TODO (Этап 5): Заменить на RedisStorage — см. комментарий в конце файла
 storage = MemoryStorage()
 
 bot = Bot(
-    token=BOT_TOKEN, 
+    token=BOT_TOKEN,
     default=DefaultBotProperties(parse_mode=ParseMode.HTML)
 )
 dp = Dispatcher(storage=storage)
+
+# ── Регистрируем роутеры aiogram ─────────────────────────────────────────────
+# ВАЖНО: порядок имеет значение — более специфичные хендлеры первыми
+dp.include_router(channel_handlers.router)
+dp.include_router(post_handlers.router)
 
 
 @dp.message(CommandStart())
 async def start_default(message: Message):
     kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="🎲 Открыть RandomWay", web_app=WebAppInfo(url=MINI_APP_URL))
+        InlineKeyboardButton(
+            text="🎲 Открыть RandomWay",
+            web_app=WebAppInfo(url=MINI_APP_URL)
+        )
     ]])
     await message.answer(
         "👋 Привет! Я <b>RandomWay</b> — бот для честных розыгрышей.\n\nОткрыть приложение 👇",
@@ -79,25 +87,32 @@ async def lifespan(app: FastAPI):
             allowed_updates=dp.resolve_used_update_types(),
             drop_pending_updates=True,
         )
+        logging.info("✅ Webhook установлен")
     except Exception as e:
         logging.error(f"Webhook setup failed: {e}")
 
     app.state.bot = bot
     app.state.dp  = dp
     yield
+
     try:
         await bot.session.close()
     except Exception:
         pass
 
+
 app = FastAPI(lifespan=lifespan)
 
+# ── CORS: только наш фронтенд ─────────────────────────────────────────────────
+# Mini App работает на randomway.pro, API на api.randomway.pro
+# Блокировать браузерный доступ к самому приложению — задача TelegramProvider.tsx
+# CORS здесь защищает API от запросов с чужих доменов
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://randomway.pro"],  # ← ТОЛЬКО наш домен, не wildcard
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "DELETE", "PUT", "PATCH"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 app.include_router(api_router)
@@ -118,16 +133,75 @@ async def telegram_webhook(request: Request, bg_tasks: BackgroundTasks):
 
     update_data = await request.json()
     update = Update.model_validate(update_data)
-
     bg_tasks.add_task(process_update_safe, update)
     return JSONResponse({"ok": True})
 
 
 @app.get("/health")
 async def health():
+    """Реальная проверка здоровья — пингует PostgreSQL и Redis."""
+    from database import engine
+    import redis.asyncio as aioredis
+
+    errors = {}
+
+    # Проверка PostgreSQL
+    try:
+        async with engine.connect() as conn:
+            from sqlalchemy import text
+            await conn.execute(text("SELECT 1"))
+    except Exception as e:
+        errors["postgres"] = str(e)
+
+    # Проверка Redis
+    try:
+        redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+        r = await aioredis.from_url(redis_url, socket_connect_timeout=2)
+        await r.ping()
+        await r.aclose()
+    except Exception as e:
+        errors["redis"] = str(e)
+
+    if errors:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "unhealthy", "errors": errors}
+        )
+
     return {"status": "ok"}
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ПЛАН МИГРАЦИИ MemoryStorage → RedisStorage (Этап 5, см. отдельный комментарий)
+# ──────────────────────────────────────────────────────────────────────────────
+#
+# Проблема MemoryStorage:
+#   - Состояния FSM живут ТОЛЬКО в памяти одного процесса
+#   - Перезапуск / деплой — все активные диалоги сбрасываются
+#   - 2 воркера uvicorn — у каждого своё состояние, бот "забывает" юзера
+#
+# Правильная замена:
+#
+#   from aiogram.fsm.storage.redis import RedisStorage
+#
+#   # Используем ОТДЕЛЬНУЮ Redis DB (не 0) чтобы не мешать Celery
+#   REDIS_FSM_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+#   # Замени /0 на /3 в .env или прямо здесь:
+#   REDIS_FSM_URL = REDIS_FSM_URL.rsplit("/", 1)[0] + "/3"
+#
+#   storage = RedisStorage.from_url(
+#       REDIS_FSM_URL,
+#       key_builder=DefaultKeyBuilder(with_bot_id=True)
+#   )
+#
+# Почему раньше "вешало":
+#   Скорее всего redis_url содержал redis+sentinel:// или SSL без verify_ssl=False
+#   Или использовалась та же DB что у Celery — конфликт сериализации.
+#   Решение: отдельная DB (db=3) + таймауты в конфиге aioboto3.
+#
+# Когда переходить: сразу в Этапе 5, до первого продакшн-запуска.
+# ──────────────────────────────────────────────────────────────────────────────

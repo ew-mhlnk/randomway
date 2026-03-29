@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation'; // 🚀 ДОБАВИЛИ ХУК
 import { useTelegram } from '@/app/providers/TelegramProvider';
 
-const API = 'https://api.randomway.pro';
+export const API = 'https://api.randomway.pro/api/v1';
 
 export default function JoinGiveawayPage() {
   const params = useParams(); // 🚀 ДОСТАЕМ ПАРАМЕТРЫ ЧЕРЕЗ ХУК
@@ -143,14 +143,17 @@ export default function JoinGiveawayPage() {
                   <button 
                     onClick={() => {
                       haptic?.selectionChanged();
-                      // ТВОЯ РЕАЛЬНАЯ ССЫЛКА (Без заглушек!)
-                      const refLink = `https://t.me/randomwaybot/randomway?startapp=gw_${giveawayId}_ref_${participantData.referral_code}`;
-                      navigator.clipboard.writeText(refLink);
-                      window.Telegram?.WebApp?.showAlert("Ссылка скопирована!");
+                      // ВАЖНО: Используем имя БОТА, а не юзера, чтобы ссылка вела в Mini App
+                      const botUsername = 'randomwaybot'; 
+                      const refLink = `https://t.me/${botUsername}/randomway?startapp=gw_${giveawayId}_ref_${participantData.referral_code}`;
+                      
+                      // Нативный метод шеринга в Telegram (предложит выбрать чат)
+                      const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(refLink)}&text=${encodeURIComponent('Участвуй в розыгрыше со мной!')}`;
+                      window.Telegram?.WebApp?.openTelegramLink(shareUrl);
                     }}
-                    className="px-4 py-2 bg-white/10 text-white rounded-lg text-sm font-medium"
+                    className="px-4 py-2 bg-white/10 text-(--text-primary) rounded-lg text-sm font-medium active:scale-95 transition-transform"
                   >
-                    Копировать
+                    Поделиться
                   </button>
                 </div>
               )}
@@ -159,10 +162,26 @@ export default function JoinGiveawayPage() {
                 <div className="glass-card p-4 rounded-xl flex items-center justify-between border-white/5">
                   <div>
                     <p className="font-bold text-(--text-primary) text-sm">Выложить Story</p>
-                    <p className="text-xs text-(--text-secondary) mt-1">+1 шанс за переходы</p>
+                    <p className="text-xs text-(--text-secondary) mt-1">+1 шанс за сторис</p>
                   </div>
-                  <button className="px-4 py-2 bg-white/10 text-white rounded-lg text-sm font-medium">
-                    Ссылка
+                  <button 
+                    onClick={() => {
+                      haptic?.impactOccurred('medium');
+                      const botUsername = 'randomwaybot';
+                      const storyLink = `https://t.me/${botUsername}/randomway?startapp=gw_${giveawayId}_story_${participantData.referral_code}`;
+                      
+                      // Нативный API для шаринга в Stories (только для мобилок)
+                      if (window.Telegram?.WebApp?.shareToStory) {
+                        window.Telegram.WebApp.shareToStory(storyLink, { text: "Участвую в топовом розыгрыше! 🎁" });
+                      } else {
+                        // Фолбэк для старых клиентов: просто копируем
+                        navigator.clipboard.writeText(storyLink);
+                        window.Telegram?.WebApp?.showAlert("Ссылка скопирована! Вставьте её в вашу историю.");
+                      }
+                    }}
+                    className="px-4 py-2 bg-white/10 text-(--text-primary) rounded-lg text-sm font-medium active:scale-95 transition-transform"
+                  >
+                    Выложить
                   </button>
                 </div>
               )}
@@ -173,7 +192,15 @@ export default function JoinGiveawayPage() {
                     <p className="font-bold text-(--text-primary) text-sm">Забустить канал</p>
                     <p className="text-xs text-(--text-secondary) mt-1">+1 шанс за буст</p>
                   </div>
-                  <button className="px-4 py-2 bg-(--accent-blue) text-white rounded-lg text-sm font-medium">
+                  <button 
+                    onClick={() => {
+                      haptic?.impactOccurred('medium');
+                      // TODO: Сюда нужно передавать реальный username канала-спонсора с бэкенда
+                      // Пока открываем модалку:
+                      window.Telegram?.WebApp?.showAlert("Функция буста появится после настройки каналов.");
+                    }}
+                    className="px-4 py-2 bg-(--accent-blue) text-white rounded-lg text-sm font-medium active:scale-95 transition-transform"
+                  >
                     Буст
                   </button>
                 </div>

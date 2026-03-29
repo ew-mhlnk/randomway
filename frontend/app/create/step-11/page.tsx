@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useTelegram } from '@/app/providers/TelegramProvider';
 import { useGiveawayStore } from '@/store/useGiveawayStore';
 
-const API = 'https://api.randomway.pro';
+export const API = 'https://api.randomway.pro/api/v1';
 
 export default function Step11Page() {
   const router = useRouter();

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useTelegram } from '../providers/TelegramProvider';
 import NativeBackButton from '../../components/NativeBackButton';
 
-const API = 'https://api.randomway.pro';
+export const API = 'https://api.randomway.pro/api/v1';
 
 interface Channel {
   id: number;
