@@ -1,10 +1,12 @@
 from fastapi import APIRouter
-from .auth import router as auth_router
-from .bot_triggers import router as bot_router
-from .channels import router as channels_router
-from .templates import router as templates_router
-from .giveaways import router as giveaways_router
-from .participants import router as participants_router
+
+# Жестко указываем, что берем файлы именно из папки api/
+from api.auth import router as auth_router
+from api.bot_triggers import router as bot_router
+from api.channels import router as channels_router
+from api.templates import router as templates_router
+from api.giveaways import router as giveaways_router
+from api.participants import router as participants_router
 
 api_router = APIRouter()
 
