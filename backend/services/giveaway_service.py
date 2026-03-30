@@ -71,7 +71,8 @@ class GiveawayService:
         bot = Bot(token=os.getenv("BOT_TOKEN"), default=DefaultBotProperties(parse_mode=ParseMode.HTML))
         try:
             async with AsyncSessionLocal() as db:
-                giveaway = await giveaway_repo.get_active_by_id(db, giveaway_id)
+                # 🚀 ИСПРАВЛЕНО: ищем по ID без проверки на 'active', так как статус уже 'finalizing'
+                giveaway = await giveaway_repo.get_by_id(db, giveaway_id)
                 if not giveaway: return
                 
                 giveaway.status = "finalizing"
