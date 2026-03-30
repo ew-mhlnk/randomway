@@ -91,6 +91,20 @@ class ParticipantService:
             if ref_code:
                 await participant_repo.increment_invite(db, ref_code)
 
+        # Собираем ссылку на Буст (берем первый канал спонсоров)
+        boost_url = None
+        if giveaway.use_boosts and giveaway.sponsor_channel_ids:
+            from sqlalchemy.future import select
+            from models import Channel
+            main_channel = await db.scalar(select(Channel).where(Channel.id == giveaway.sponsor_channel_ids[0]))
+            if main_channel:
+                if main_channel.username:
+                    boost_url = f"https://t.me/boost/{main_channel.username}"
+                else:
+                    # Для приватных каналов ссылка имеет вид https://t.me/boost?c=123456
+                    c_id = str(main_channel.telegram_id).replace("-100", "")
+                    boost_url = f"https://t.me/boost?c={c_id}"
+
         return {
             "status": "success",
             "giveaway": {
@@ -98,11 +112,14 @@ class ParticipantService:
                 "use_boosts": giveaway.use_boosts,
                 "use_invites": giveaway.use_invites,
                 "use_stories": giveaway.use_stories,
+                "boost_url": boost_url
             },
             "participant": {
                 "referral_code": participant.referral_code,
                 "invite_count": participant.invite_count,
-            },
+                "has_boosted": participant.has_boosted,
+                "story_clicks": participant.story_clicks
+            }
         }
 
 

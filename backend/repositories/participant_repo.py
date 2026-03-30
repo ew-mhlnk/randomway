@@ -1,6 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import update, func
+from sqlalchemy import update, func, case
 from models import Participant
 from repositories.base import BaseRepository
 
@@ -41,5 +41,23 @@ class ParticipantRepository(BaseRepository[Participant]):
             .where(self.model.giveaway_id == giveaway_id, self.model.is_winner == True)
         )
         return result.all() # Вернет список кортежей (Participant, User)
+
+    async def get_analytics_stats(self, db: AsyncSession, giveaway_id: int) -> dict:
+        """Один быстрый запрос для получения всей аналитики розыгрыша"""
+        result = await db.execute(
+            select(
+                func.count(self.model.id).label("total"),
+                # Считаем тех, у кого is_active = False (ливнули/хитрецы)
+                func.sum(case((self.model.is_active == False, 1), else_=0)).label("cheaters"),
+                # Считаем тех, кто дал буст
+                func.sum(case((self.model.has_boosted == True, 1), else_=0)).label("boosts")
+            ).where(self.model.giveaway_id == giveaway_id)
+        )
+        row = result.fetchone()
+        return {
+            "total": row.total or 0,
+            "cheaters": row.cheaters or 0,
+            "boosts": row.boosts or 0
+        }
 
 participant_repo = ParticipantRepository()

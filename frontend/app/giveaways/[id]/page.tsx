@@ -4,16 +4,16 @@ import { useParams, useRouter } from 'next/navigation';
 import { useTelegram } from '@/app/providers/TelegramProvider';
 import NativeBackButton from '@/components/NativeBackButton';
 
-// Используй свой относительный путь, если делала через import { API } from '../../lib/api'
 const API = 'https://api.randomway.pro/api/v1';
 
 export default function AdminGiveawayPage() {
   const params = useParams();
   const giveawayId = params?.id;
+  const router = useRouter();
   const { initData, haptic } = useTelegram();
   
   const [status, setStatus] = useState<string>('loading');
-  const[winners, setWinners] = useState<any[]>([]);
+  const [winners, setWinners] = useState<any[]>([]);
   const [analytics, setAnalytics] = useState<any>(null);
   const [isDrawing, setIsDrawing] = useState(false);
 
@@ -28,7 +28,7 @@ export default function AdminGiveawayPage() {
       const anData = await anRes.json();
       
       setStatus(statData.status);
-      if (statData.status === 'completed') setWinners(statData.winners);
+      if (statData.status === 'completed') setWinners(statData.winners ||[]);
       setAnalytics(anData);
     } catch (e) { console.error(e); }
   };
@@ -38,13 +38,26 @@ export default function AdminGiveawayPage() {
     let interval: NodeJS.Timeout;
     if (status === 'finalizing') interval = setInterval(fetchData, 3000);
     return () => clearInterval(interval);
-  },[initData, giveawayId, status]);
+  }, [initData, giveawayId, status]);
+
+  // 🚀 ВЕРНУЛИ КНОПКУ ЗАВЕРШЕНИЯ ДОСРОЧНО
+  const handleFinalize = async () => {
+    const tg = window.Telegram?.WebApp;
+    tg?.showPopup({
+      message: 'Подвести итоги досрочно? Бот проверит всех участников.',
+      buttons:[{ id: 'cancel', type: 'cancel', text: 'Отмена' }, { id: 'ok', type: 'destructive', text: 'Запустить' }]
+    }, async (btn) => {
+      if (btn !== 'ok') return;
+      haptic?.impactOccurred('heavy');
+      setStatus('finalizing');
+      await fetch(`${API}/giveaways/${giveawayId}/finalize`, { method: 'POST', headers: { Authorization: `Bearer ${initData}` } });
+    });
+  };
 
   const handleDrawAdditional = () => {
     const tg = window.Telegram?.WebApp;
     if (!tg) return;
     
-    // Спрашиваем количество через нативный метод (или кастомный UI)
     tg.showPopup({
       title: 'Дополнительные победители',
       message: 'Сколько новых победителей нужно выбрать?',
@@ -78,7 +91,7 @@ export default function AdminGiveawayPage() {
         }
         
         tg.showAlert(`Успешно! ${count} новых победителей выбраны. Пост отправлен в канал.`);
-        fetchData(); // Обновляем список на экране
+        fetchData(); 
       } catch (e) {
         tg.showAlert("Произошла ошибка сети.");
       } finally {
@@ -105,6 +118,20 @@ export default function AdminGiveawayPage() {
         </div>
       )}
 
+      {/* 🚀 ВЕРНУЛИ ИНТЕРФЕЙС ДЛЯ ACTIVE И FINALIZING */}
+      {status === 'active' && (
+        <button onClick={handleFinalize} className="w-full mt-4 h-14 rounded-2xl font-bold text-[16px] bg-red-500/10 text-red-500 border border-red-500/20 active:scale-95 transition-transform">
+          Подвести итоги досрочно
+        </button>
+      )}
+
+      {status === 'finalizing' && (
+        <div className="flex flex-col items-center text-center mt-10">
+          <div className="w-12 h-12 border-4 border-(--accent-blue) border-t-transparent rounded-full animate-spin"></div>
+          <p className="text-(--text-secondary) mt-4">Бот проверяет подписки и крутит рулетку...</p>
+        </div>
+      )}
+
       {status === 'completed' && (
         <div className="mt-4">
           <div className="flex justify-between items-end mb-4">
@@ -113,7 +140,7 @@ export default function AdminGiveawayPage() {
             <button 
               onClick={handleDrawAdditional} 
               disabled={isDrawing}
-              className="text-xs font-medium bg-(--accent-blue)/10 text-(--accent-blue) px-3 py-1.5 rounded-lg active:scale-95 disabled:opacity-50"
+              className="text-xs font-medium bg-(--accent-blue)/10 text-(--accent-blue) px-3 py-1.5 rounded-lg active:scale-95 disabled:opacity-50 transition-colors"
             >
               {isDrawing ? "Выбираем..." : "+ Довыбрать"}
             </button>

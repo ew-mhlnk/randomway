@@ -61,18 +61,17 @@ async def get_giveaway_analytics(
     user_id: int = Depends(get_user_id), 
     db: AsyncSession = Depends(get_db)
 ):
-    """Эндпоинт для отображения статистики в админке розыгрыша"""
     giveaway = await giveaway_repo.get_by_id(db, giveaway_id)
     if not giveaway or giveaway.creator_id != user_id:
         raise HTTPException(status_code=404, detail="Розыгрыш не найден")
 
-    total_participants = await participant_repo.count_by_giveaway(db, giveaway_id)
+    # Вызываем наш новый крутой метод
+    stats = await participant_repo.get_analytics_stats(db, giveaway_id)
     
-    # Пока отдаем базовую аналитику
     return {
-        "total_participants": total_participants,
-        "cheaters_caught": 0, 
-        "total_boosts": 0     
+        "total_participants": stats["total"],
+        "cheaters_caught": stats["cheaters"], 
+        "total_boosts": stats["boosts"]     
     }
 
 @router.post("/giveaways/{giveaway_id}/draw-additional")

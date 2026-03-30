@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramRetryAfter
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from database import AsyncSessionLocal
@@ -18,6 +19,30 @@ from repositories.channel_repo import channel_repo
 
 # Импортируем сам Celery (без задач!), чтобы отправлять команды
 from celery_app import celery
+
+# Максимум 20 параллельных запросов к Telegram API
+_TG_SEMAPHORE = asyncio.Semaphore(20)
+
+async def _check_member_safe(bot: Bot, chat_id: int, user_id: int) -> bool:
+    """Безопасная проверка подписки с обработкой Rate Limits (429)"""
+    async with _TG_SEMAPHORE:
+        for attempt in range(3):  # 3 попытки на случай сбоев сети
+            try:
+                member = await asyncio.wait_for(
+                    bot.get_chat_member(chat_id=chat_id, user_id=user_id),
+                    timeout=5.0
+                )
+                return member.status not in ["left", "kicked", "banned"]
+            except TelegramRetryAfter as e:
+                # Telegram ругается на спам и говорит, сколько секунд подождать
+                wait_time = e.retry_after + 1
+                logging.warning(f"Telegram Rate Limit! Ждем {wait_time}с для юзера {user_id}")
+                await asyncio.sleep(wait_time)
+            except asyncio.TimeoutError:
+                return True # Если ТГ лагает, не наказываем участника
+            except Exception as e:
+                return True # При других ошибках (например, бот не админ) тоже считаем честным
+        return True # Исчерпали попытки
 
 class GiveawayService:
     
@@ -82,35 +107,40 @@ class GiveawayService:
                 sponsor_channels = await channel_repo.get_by_ids(db, giveaway.sponsor_channel_ids)
                 
                 valid_participants =[]
-                batch_size = 25
+                batch_size = 50 # Можно увеличить батч, так как есть семафор
                 
+                # Вспомогательная функция для проверки одного юзера по всем каналам
+                async def check_user_channels(p):
+                    if not sponsor_channels:
+                        return p, True
+                    checks = await asyncio.gather(*[
+                        _check_member_safe(bot, ch.telegram_id, p.user_id)
+                        for ch in sponsor_channels
+                    ])
+                    return p, all(checks)
+
                 for i in range(0, len(participants), batch_size):
                     batch = participants[i:i+batch_size]
-                    for p in batch:
-                        is_honest = True
-                        for ch in sponsor_channels:
-                            try:
-                                member = await bot.get_chat_member(chat_id=ch.telegram_id, user_id=p.user_id)
-                                if member.status in["left", "kicked", "banned"]:
-                                    is_honest = False
-                                    break
-                            except Exception:
-                                pass
-                                
+                    
+                    # Запускаем проверку всего батча параллельно! (Семафор внутри сдержит нагрузку)
+                    results = await asyncio.gather(*[check_user_channels(p) for p in batch])
+                    
+                    for p, is_honest in results:
                         if is_honest:
                             valid_participants.append(p)
                         else:
-                            p.is_active = False 
+                            p.is_active = False # Помечаем как хитреца
                             db.add(p)
                     
                     await db.commit()
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(0.5) # Маленькая пауза между батчами
 
                 pool =[]
                 for p in valid_participants:
                     tickets = 1
                     if p.has_boosted: tickets += 1
                     tickets += p.invite_count
+                    if p.story_clicks > 0: tickets += 1 # <--- ДОБАВЛЕНО
                     pool.extend([p.user_id] * tickets)
                     
                 winners_ids = set()
@@ -246,6 +276,7 @@ class GiveawayService:
                 tickets = 1
                 if p.has_boosted: tickets += 1
                 tickets += p.invite_count
+                if p.story_clicks > 0: tickets += 1 # <--- ДОБАВЛЕНО
                 
                 pool.extend([p.user_id] * tickets)
                 available_participants[p.user_id] = p
