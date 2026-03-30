@@ -219,4 +219,89 @@ class GiveawayService:
             "winners": winners
         }
 
+    async def draw_additional_winners(self, db: AsyncSession, bot: Bot, giveaway_id: int, count: int, user_id: int):
+        import random
+        from models import User
+        
+        # Используем криптографически безопасный генератор (Enterprise standard)
+        secure_random = random.SystemRandom()
+
+        # 1. Проверяем права создателя
+        giveaway = await giveaway_repo.get_by_id(db, giveaway_id)
+        if not giveaway or giveaway.creator_id != user_id:
+            raise HTTPException(status_code=403, detail="Нет прав или розыгрыш не найден")
+
+        if giveaway.status != "completed":
+            raise HTTPException(status_code=400, detail="Розыгрыш еще не завершен")
+
+        # 2. Получаем всех честных участников, которые ЕЩЕ НЕ выиграли
+        participants = await participant_repo.get_all_by_giveaway(db, giveaway_id)
+        
+        pool =[]
+        available_participants = {}
+
+        for p in participants:
+            if p.is_active and not p.is_winner:
+                # Считаем билеты с учетом бустов и приглашений
+                tickets = 1
+                if p.has_boosted: tickets += 1
+                tickets += p.invite_count
+                
+                pool.extend([p.user_id] * tickets)
+                available_participants[p.user_id] = p
+
+        # 3. Проверяем, хватает ли уникальных людей
+        unique_available_users = set(pool)
+        if len(unique_available_users) < count:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Недостаточно новых участников. Доступно: {len(unique_available_users)}"
+            )
+
+        # 4. Крутим рулетку
+        new_winners_ids = set()
+        while len(new_winners_ids) < count and pool:
+            chosen_id = secure_random.choice(pool)
+            new_winners_ids.add(chosen_id)
+            # Удаляем все билеты этого юзера, чтобы он не выиграл дважды
+            pool =[x for x in pool if x != chosen_id]
+
+        # 5. Обновляем флаги в БД
+        new_winners_list = []
+        for wid in new_winners_ids:
+            p = available_participants[wid]
+            p.is_winner = True
+            db.add(p)
+            new_winners_list.append(wid)
+
+        giveaway.winners_count += count # Увеличиваем общее число победителей в статистике
+        await db.commit()
+
+        # 6. Получаем юзернеймы новых победителей для поста
+        users_result = await db.execute(select(User).where(User.telegram_id.in_(new_winners_list)))
+        new_winner_users = users_result.scalars().all()
+
+        winners_text = "\n".join([
+            f"🏆 {u.first_name}" + (f" (@{u.username})" if u.username else "") 
+            for u in new_winner_users
+        ])
+
+        post_text = (
+            f"🎁 <b>Дополнительные победители!</b>\n"
+            f"В розыгрыше «{giveaway.title}» выбраны новые счастливчики:\n\n"
+            f"{winners_text}"
+        )
+
+        # 7. Рассылаем в каналы итогов
+        if giveaway.result_channel_ids:
+            channels = await channel_repo.get_by_ids(db, giveaway.result_channel_ids)
+            for ch in channels:
+                try:
+                    await bot.send_message(chat_id=ch.telegram_id, text=post_text)
+                    await asyncio.sleep(0.5) # Защита от Rate Limit Telegram
+                except Exception as e:
+                    logging.error(f"Ошибка публикации доп. победителей в {ch.title}: {e}")
+
+        return {"status": "success", "drawn_count": len(new_winners_ids)}
+
 giveaway_service = GiveawayService()

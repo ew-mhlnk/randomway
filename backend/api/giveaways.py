@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Request, BackgroundTasks, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from api.dependencies import get_user_id
 from database import get_db
-from schemas import GiveawayPublishSchema
+from schemas import GiveawayPublishSchema, DrawAdditionalRequest
 from services.giveaway_service import giveaway_service
 from repositories.participant_repo import participant_repo
 from repositories.giveaway_repo import giveaway_repo
@@ -53,7 +53,7 @@ async def get_giveaway_status(
 ):
     return await giveaway_service.get_giveaway_status(db, giveaway_id)
 
-# 🚀 НОВЫЕ ЭНДПОИНТЫ (Аналитика и Перевыбор)
+# 🚀 НОВЫЕ ЭНДПОИНТЫ (Аналитика и Дополнительные победители)
 
 @router.get("/giveaways/{giveaway_id}/analytics")
 async def get_giveaway_analytics(
@@ -75,12 +75,14 @@ async def get_giveaway_analytics(
         "total_boosts": 0     
     }
 
-@router.post("/giveaways/{giveaway_id}/reroll/{old_winner_id}")
-async def reroll_winner(
+@router.post("/giveaways/{giveaway_id}/draw-additional")
+async def draw_additional_endpoint(
     giveaway_id: int, 
-    old_winner_id: int, 
+    payload: DrawAdditionalRequest,
+    request: Request,
     user_id: int = Depends(get_user_id), 
     db: AsyncSession = Depends(get_db)
 ):
-    """Эндпоинт для перевыбора победителя (заглушка на будущее)"""
-    return {"status": "success"}
+    """Выбрать N дополнительных победителей"""
+    bot = request.app.state.bot
+    return await giveaway_service.draw_additional_winners(db, bot, giveaway_id, payload.count, user_id)

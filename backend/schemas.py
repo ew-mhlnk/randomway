@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime
 
@@ -26,3 +26,6 @@ class GiveawayPublishSchema(BaseModel):
 class JoinGiveawayRequest(BaseModel):
     ref_code: str | None = None
     captcha_token: str | None = None  # 🚀 ДОБАВЛЕНО
+
+class DrawAdditionalRequest(BaseModel):
+    count: int = Field(..., gt=0, le=100, description="Количество дополнительных победителей")
