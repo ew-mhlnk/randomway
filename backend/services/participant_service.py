@@ -43,8 +43,10 @@ class ParticipantService:
                     ) as resp:
                         outcome = await resp.json()
                         if not outcome.get("success"):
+                            # 🚀 ДОБАВИЛИ ЛОГИРОВАНИЕ ОШИБКИ CLOUDFLARE
+                            logging.error(f"Cloudflare Turnstile Error: {outcome}")
                             raise HTTPException(
-                                status_code=400, detail="Капча не пройдена. Вы бот?"
+                                status_code=400, detail="Капча не пройдена. Попробуйте еще раз."
                             )
 
         # ── Проверка подписок ─────────────────────────────────────────────────
@@ -79,7 +81,6 @@ class ParticipantService:
         )
 
         if not participant:
-            # ✅ ИСПРАВЛЕНО: правильный kwarg obj_in_data (не obj_in)
             participant = await participant_repo.create(
                 db,
                 obj_in_data={
@@ -101,7 +102,6 @@ class ParticipantService:
                 if main_channel.username:
                     boost_url = f"https://t.me/boost/{main_channel.username}"
                 else:
-                    # Для приватных каналов ссылка имеет вид https://t.me/boost?c=123456
                     c_id = str(main_channel.telegram_id).replace("-100", "")
                     boost_url = f"https://t.me/boost?c={c_id}"
 

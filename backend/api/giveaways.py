@@ -9,16 +9,17 @@ from repositories.participant_repo import participant_repo
 
 router = APIRouter(tags=["Giveaways"])
 
-# 1. ПУБЛИЧНЫЙ ЭНДПОИНТ (Без авторизации, чтобы узнать про капчу)
+# 1. ПУБЛИЧНЫЙ ЭНДПОИНТ (Без авторизации, чтобы узнать про капчу и статус)
 @router.get("/giveaways/{giveaway_id}/public")
 async def get_public_giveaway_info(giveaway_id: int, db: AsyncSession = Depends(get_db)):
-    # Используем get_by_id вместо get_active_by_id для надежности
+    # Используем get_by_id, чтобы находить даже завершенные розыгрыши
     giveaway = await giveaway_repo.get_by_id(db, giveaway_id)
     if not giveaway:
         raise HTTPException(status_code=404, detail="Розыгрыш не найден")
     return {
         "id": giveaway.id,
         "title": giveaway.title,
+        "status": giveaway.status,  # <--- ДОБАВЛЕН СТАТУС
         "use_captcha": giveaway.use_captcha,
         "use_boosts": giveaway.use_boosts,
         "use_invites": giveaway.use_invites,
