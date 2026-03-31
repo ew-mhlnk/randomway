@@ -21,7 +21,12 @@ async def join_giveaway(
 ):
     bot = request.app.state.bot
     return await participant_service.join_giveaway(
-        db=db, bot=bot, giveaway_id=giveaway_id, user_id=user_id, ref_code=payload.ref_code
+        db=db, 
+        bot=bot, 
+        giveaway_id=giveaway_id, 
+        user_id=user_id, 
+        ref_code=payload.ref_code,
+        payload=payload.model_dump() # 🚀 ВОТ ОНО! ПЕРЕДАЕМ ТОКЕН КАПЧИ
     )
 
 @router.post("/giveaways/{giveaway_id}/check-boost")
