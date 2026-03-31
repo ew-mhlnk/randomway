@@ -79,7 +79,13 @@ export default function Step11Page() {
             : "Розыгрыш запланирован и будет опубликован в указанное время."}
         </p>
         <button 
-          onClick={() => { haptic?.selectionChanged(); router.push('/'); }} 
+          onClick={() => { 
+            haptic?.selectionChanged(); 
+            // router.replace затирает историю текущей страницы
+            router.replace('/'); 
+            // А эта нативная команда скрывает кнопку "Назад" в самом Telegram
+            window.Telegram?.WebApp?.BackButton?.hide();
+          }} 
           className="w-full py-4 rounded-xl bg-(--bg-card) border border-white/10 text-(--text-primary) font-bold"
         >
           Вернуться на главную
