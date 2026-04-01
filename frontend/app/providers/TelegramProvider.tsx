@@ -12,13 +12,6 @@ interface TelegramUser {
   language_code?: string;
 }
 
-interface TelegramUser {
-  id: number;
-  first_name: string;
-  username?: string;
-  language_code?: string;
-}
-
 interface TelegramContextType {
   user: TelegramUser | null;
   initData: string;
@@ -93,8 +86,16 @@ export function TelegramProvider({ children }: { children: ReactNode }) {
   
   // ➕ СОСТОЯНИЕ БЛОКИРОВКИ
   const [isWebBlocked, setIsWebBlocked] = useState(false);
+  const [isAdminRoute, setIsAdminRoute] = useState(false); // 🚀 НОВОЕ
 
   useEffect(() => {
+    // 🚀 ПРОВЕРЯЕМ: Если мы заходим в админку, отключаем логику Telegram!
+    if (typeof window !== 'undefined' && window.location.pathname.startsWith('/admin')) {
+      setIsAdminRoute(true);
+      setIsLoading(false);
+      return;
+    }
+
     const tg = window.Telegram?.WebApp;
 
     if (!tg) {
@@ -142,8 +143,8 @@ export function TelegramProvider({ children }: { children: ReactNode }) {
     }).catch(() => console.warn('Auth failed'));
   }, [initData]);
 
-  // 🛡 ЕСЛИ ЭТО WEB-ВЕРСИЯ — ПОКАЗЫВАЕМ ЭКРАН ОШИБКИ
-  if (isWebBlocked) {
+  // 🛡 ЕСЛИ ЭТО WEB-ВЕРСИЯ И ЭТО НЕ АДМИНКА — ПОКАЗЫВАЕМ ЭКРАН ОШИБКИ
+  if (isWebBlocked && !isAdminRoute) {
     return (
       <div className="min-h-screen bg-[#0a0a0a] flex flex-col items-center justify-center p-6 text-center">
         <span className="text-6xl mb-6">📱</span>
@@ -155,6 +156,11 @@ export function TelegramProvider({ children }: { children: ReactNode }) {
         </p>
       </div>
     );
+  }
+
+  // 🚀 ЕСЛИ ЭТО АДМИНКА — ПРОСТО ОТДАЕМ ДЕТЕЙ (БЕЗ КОНТЕКСТА ТЕЛЕГРАМА)
+  if (isAdminRoute) {
+    return <>{children}</>;
   }
 
   return (

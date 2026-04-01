@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import { useTelegram } from '@/app/providers/TelegramProvider';
 import NativeBackButton from '@/components/NativeBackButton';
 
@@ -9,7 +9,6 @@ const API = 'https://api.randomway.pro/api/v1';
 export default function AdminGiveawayPage() {
   const params = useParams();
   const giveawayId = params?.id;
-  const router = useRouter();
   const { initData, haptic } = useTelegram();
   
   const [status, setStatus] = useState<string>('loading');
@@ -40,7 +39,6 @@ export default function AdminGiveawayPage() {
     return () => clearInterval(interval);
   }, [initData, giveawayId, status]);
 
-  // 🚀 ВЕРНУЛИ КНОПКУ ЗАВЕРШЕНИЯ ДОСРОЧНО
   const handleFinalize = async () => {
     const tg = window.Telegram?.WebApp;
     tg?.showPopup({
@@ -100,13 +98,32 @@ export default function AdminGiveawayPage() {
     });
   };
 
+  // 🚀 НОВАЯ ФУНКЦИЯ ЭКСПОРТА CSV 
+  const handleExportCSV = async () => {
+    haptic?.impactOccurred('medium');
+    try {
+      const res = await fetch(`${API}/giveaways/${giveawayId}/export`, {
+        headers: { 'Authorization': `Bearer ${initData}` }
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        window.Telegram?.WebApp?.showAlert(err.detail || "Ошибка при формировании файла.");
+        return;
+      }
+      window.Telegram?.WebApp?.showAlert("Файл со списком участников отправлен вам в личные сообщения с ботом! 📄");
+      haptic?.notificationOccurred('success');
+    } catch (e) {
+      window.Telegram?.WebApp?.showAlert("Ошибка сети");
+    }
+  };
+
   return (
     <main className="min-h-screen p-4 pt-6 flex flex-col animate-in fade-in duration-300 pb-20">
       <NativeBackButton />
       <h1 className="text-2xl font-bold text-(--text-primary) mb-6">Управление</h1>
 
       {analytics && (
-        <div className="grid grid-cols-2 gap-3 mb-8">
+        <div className="grid grid-cols-2 gap-3 mb-4">
           <div className="glass-card p-4 rounded-xl text-center border border-white/5">
             <p className="text-3xl font-bold text-(--text-primary)">{analytics.total_participants}</p>
             <p className="text-xs text-(--text-secondary) mt-1">Всего участников</p>
@@ -118,9 +135,18 @@ export default function AdminGiveawayPage() {
         </div>
       )}
 
-      {/* 🚀 ВЕРНУЛИ ИНТЕРФЕЙС ДЛЯ ACTIVE И FINALIZING */}
+      {/* 🚀 НОВАЯ КНОПКА СКАЧИВАНИЯ CSV */}
+      {analytics && (
+        <button 
+          onClick={handleExportCSV}
+          className="w-full mb-6 flex items-center justify-center gap-2 py-3 rounded-xl bg-white/5 border border-white/10 text-(--text-primary) font-medium active:scale-95 transition-transform"
+        >
+          <span className="text-lg">📊</span> Скачать список (в чат с ботом)
+        </button>
+      )}
+
       {status === 'active' && (
-        <button onClick={handleFinalize} className="w-full mt-4 h-14 rounded-2xl font-bold text-[16px] bg-red-500/10 text-red-500 border border-red-500/20 active:scale-95 transition-transform">
+        <button onClick={handleFinalize} className="w-full mt-2 h-14 rounded-2xl font-bold text-[16px] bg-red-500/10 text-red-500 border border-red-500/20 active:scale-95 transition-transform">
           Подвести итоги досрочно
         </button>
       )}
