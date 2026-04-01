@@ -135,24 +135,39 @@ class GiveawayService:
                     await db.commit()
                     await asyncio.sleep(0.5) # Маленькая пауза между батчами
 
+                # 🚀 НОВЫЙ БЛОК РУЛЕТКИ (С ПОДДЕРЖКОЙ РУЧНОГО ВЫБОРА)
                 pool =[]
+                pre_selected_winners = set()
+
+                # 1. Собираем тех, кого Суперадмин УЖЕ назначил победителями вручную
                 for p in valid_participants:
-                    tickets = 1
-                    if p.has_boosted: tickets += 1
-                    tickets += p.invite_count
-                    if p.story_clicks > 0: tickets += 1 # <--- ДОБАВЛЕНО
-                    pool.extend([p.user_id] * tickets)
+                    if p.is_winner:
+                        pre_selected_winners.add(p.user_id)
+                    else:
+                        # Остальным (кто еще не победитель) выдаем билеты для рулетки
+                        tickets = 1
+                        if p.has_boosted: tickets += 1
+                        tickets += p.invite_count
+                        if getattr(p, "story_clicks", 0) > 0: tickets += 1
+                        pool.extend([p.user_id] * tickets)
                     
-                winners_ids = set()
+                # В список победителей СРАЗУ добавляем тех, кого ты выбрала руками
+                winners_ids = set(pre_selected_winners)
+                
+                # 2. Добираем случайных людей на оставшиеся места (если призов больше, чем ты выбрала)
                 while len(winners_ids) < giveaway.winners_count and pool:
                     chosen_id = random.choice(pool)
                     winners_ids.add(chosen_id)
+                    # Удаляем все билеты этого юзера, чтобы он не занял два призовых места
                     pool = [x for x in pool if x != chosen_id]
 
+                # 3. Сохраняем финальные статусы
                 for p in valid_participants:
                     if p.user_id in winners_ids:
                         p.is_winner = True
-                        db.add(p)
+                    else:
+                        p.is_winner = False
+                    db.add(p)
                 
                 giveaway.status = "completed"
                 await db.commit()
