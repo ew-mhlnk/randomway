@@ -1,16 +1,20 @@
+"""backend/schemas.py"""
 from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime
 
+
 class AuthRequest(BaseModel):
     initData: str
+
 
 class GiveawayPublishSchema(BaseModel):
     title: str
     template_id: int
     button_text: str
     button_emoji: str
-    button_color: str = "default"  # 🚀 ДОБАВЛЕНО
+    button_color: str = "default"                # ← НОВОЕ
+    button_custom_emoji_id: Optional[str] = None  # ← НОВОЕ
     sponsor_channels: List[int]
     publish_channels: List[int]
     result_channels: List[int]
@@ -24,9 +28,11 @@ class GiveawayPublishSchema(BaseModel):
     use_stories: bool
     use_captcha: bool
 
+
 class JoinGiveawayRequest(BaseModel):
-    ref_code: str | None = None
-    captcha_token: str | None = None  # 🚀 ДОБАВЛЕНО
+    ref_code: Optional[str] = None
+    captcha_token: Optional[str] = None
+
 
 class DrawAdditionalRequest(BaseModel):
-    count: int = Field(..., gt=0, le=100, description="Количество дополнительных победителей")
+    count: int = Field(..., gt=0, le=100)
