@@ -73,6 +73,10 @@ class Giveaway(Base):
     button_text: Mapped[str] = mapped_column(String(100), default="Участвовать")
     button_color_emoji: Mapped[str] = mapped_column(String(10), default="🔵")
     
+    # 🚀 ДОБАВЛЕНО: Цвет кнопки и ID кастомного эмодзи (Telegram API 2026)
+    button_color: Mapped[str] = mapped_column(String(20), default="default")
+    button_emoji_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
     # Шаги 2, 3, 4: Каналы (PG_ARRAY)
     sponsor_channel_ids: Mapped[list[int]] = mapped_column(PG_ARRAY(BigInteger), default=list)
     publish_channel_ids: Mapped[list[int]] = mapped_column(PG_ARRAY(BigInteger), default=list)

@@ -10,6 +10,7 @@ class GiveawayPublishSchema(BaseModel):
     template_id: int
     button_text: str
     button_emoji: str
+    button_color: str = "default"  # 🚀 ДОБАВЛЕНО
     sponsor_channels: List[int]
     publish_channels: List[int]
     result_channels: List[int]

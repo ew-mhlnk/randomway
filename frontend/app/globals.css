@@ -1,62 +1,82 @@
-/* frontend\app\globals.css */
+/* frontend/app/globals.css */
 
 @import "tailwindcss";
 
-:root {
-  /* Светлая тема (Light Mode) */
-  --bg-primary: var(--tg-theme-bg-color, #F4F4F5);
-  --text-primary: var(--tg-theme-text-color, #000000);
-  --text-secondary: var(--tg-theme-hint-color, rgba(0, 0, 0, 0.55));
-  --bg-card: rgba(0, 0, 0, 0.04);
-  --bg-card-hover: rgba(0, 0, 0, 0.08);
-  
-  /* Тот самый градиент из макета */
-  --accent-gradient: linear-gradient(90deg, #1A8CFF 0%, #E020C0 100%);
-  --accent-blue: #1A8CFF;
-  --border-glass: rgba(0, 0, 0, 0.05);
+/* ─── Animated rotating border ────────────────────────────────────────────── */
+@property --btn-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
 }
 
-.dark {
-  /* Тёмная тема из твоих макетов (глубокий черный) */
-  --bg-primary: #0a0a0a; 
-  --text-primary: #ffffff;
-  --text-secondary: rgba(255, 255, 255, 0.5);
-  
-  /* Цвета карточек из макета */
-  --bg-card: #121212;
-  --bg-card-hover: #1a1a1a;
-  --border-glass: rgba(255, 255, 255, 0.03);
-  
-  --accent-gradient: linear-gradient(90deg, #1A8CFF 0%, #E020C0 100%);
-  --accent-blue: #1A8CFF;
+@keyframes spin-border {
+  from { --btn-angle: 0deg; }
+  to   { --btn-angle: 360deg; }
 }
 
-body {
-  background-color: var(--bg-primary);
+/* Применяется к любой кнопке с анимированным бордером */
+.animated-border-btn {
+  background:
+    linear-gradient(90deg, #0095FF 0%, #FF09D2 100%) padding-box,
+    conic-gradient(
+      from var(--btn-angle),
+      transparent 0%,
+      rgba(255, 255, 255, 0.95) 6%,
+      rgba(255, 255, 255, 0.3)  10%,
+      transparent 16%
+    ) border-box;
+  border: 2px solid transparent;
+  animation: spin-border 2.4s linear infinite;
+}
+
+/* ─── Единая тёмная тема (#0B0B0B) ────────────────────────────────────────── */
+/* Только тёмный режим — без светлой темы */
+:root,
+:root.dark {
+  --bg-primary:       #0B0B0B;
+  --bg-card:          #2E2F33;
+  --bg-card-hover:    #383A3F;
+  --bg-overlay:       rgba(255, 255, 255, 0.07);
+  --text-primary:     #ffffff;
+  --text-secondary:   #7D7D7D;
+  --text-hint:        rgba(255, 255, 255, 0.4);
+  --border-glass:     rgba(255, 255, 255, 0.08);
+  --border-glass-mid: rgba(255, 255, 255, 0.14);
+  --accent-blue:      #0095FF;
+  --accent-pink:      #FF09D2;
+  --accent-gradient:  linear-gradient(90deg, #0095FF 0%, #FF09D2 100%);
+  --radius-card:      22px;
+  --radius-btn:       30px;
+}
+
+/* Форсируем тёмный фон на уровне html/body */
+html, body {
+  background-color: var(--bg-primary) !important;
   color: var(--text-primary);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
   -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
 }
 
-/* Утилиты */
+/* ─── Утилиты ──────────────────────────────────────────────────────────────── */
 .gradient-btn {
   background: var(--accent-gradient);
   color: #ffffff;
   transition: transform 0.15s ease, opacity 0.15s ease;
 }
-
-.gradient-btn:active {
-  transform: scale(0.97);
-  opacity: 0.85;
-}
+.gradient-btn:active { transform: scale(0.97); opacity: 0.85; }
 
 .glass-card {
   background: var(--bg-card);
   border: 1px solid var(--border-glass);
-  transition: transform 0.1s ease, background 0.1s ease;
+  transition: transform 0.12s ease, background 0.12s ease;
 }
+.glass-card:active { background: var(--bg-card-hover); transform: scale(0.985); }
 
-.glass-card:active {
-  background: var(--bg-card-hover);
-  transform: scale(0.98);
+/* Глассморфный оверлей (для кнопки Назад и т.д.) */
+.glass-circle {
+  background: rgba(255, 255, 255, 0.10);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }

@@ -65,11 +65,24 @@ class GiveawayService:
                 app_short_name = os.getenv("MINI_APP_SHORT_NAME", "app") 
                 giveaway_url = f"https://t.me/{bot_info.username}/{app_short_name}?startapp=gw_{giveaway.id}"
                 
+                # 🚀 МАППИНГ ЦВЕТОВ КНОПКИ (Telegram API)
+                COLOR_MAP = {
+                    "default": None,
+                    "green": 1,
+                    "red": 2,
+                    "purple": 3,
+                }
+                
+                btn_data = {
+                    "text": f"{giveaway.button_color_emoji} {giveaway.button_text}",
+                    "url": giveaway_url,
+                }
+                
+                if giveaway.button_color and giveaway.button_color != "default":
+                    btn_data["color"] = COLOR_MAP.get(giveaway.button_color)
+
                 kb = InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(
-                        text=f"{giveaway.button_color_emoji} {giveaway.button_text}",
-                        url=giveaway_url
-                    )
+                    InlineKeyboardButton(**btn_data)
                 ]])
                 
                 for channel in channels:
@@ -201,6 +214,7 @@ class GiveawayService:
             "template_id": data['template_id'],
             "button_text": data['button_text'],
             "button_color_emoji": data['button_emoji'],
+            "button_color": data.get('button_color', 'default'), # 🚀 ДОБАВЛЕНО
             "sponsor_channel_ids": data['sponsor_channels'],
             "publish_channel_ids": data['publish_channels'],
             "result_channel_ids": data['result_channels'],
