@@ -1,7 +1,8 @@
 """backend/services/giveaway_service.py
 
 Ключевые изменения:
-- Цвет кнопки и кастомные эмодзи передаются через "магию" Pydantic v2 (extra="allow").
+- Цвет кнопки передается через поле "style" (Telegram Bot API 9.4).
+- Кастомные эмодзи передаются через "icon_custom_emoji_id" в __pydantic_extra__.
 - Отказались от сырых bot.session.make_request в пользу стандартных методов aiogram.
 - Остальная логика без изменений
 """
@@ -29,50 +30,49 @@ from repositories.participant_repo import participant_repo
 from repositories.channel_repo import channel_repo
 from celery_app import celery
 
-# ── Маппинг цвет → Telegram API integer ──────────────────────────────────
-BUTTON_COLOR_MAP: dict[str, int | None] = {
-    "default": None,
-    "green": 1,
-    "red": 2,
-    "purple": 3,
+# ── Маппинг цвета → Telegram Bot API 9.4 (style) ────────────────────────
+BUTTON_STYLE_MAP: dict[str, str | None] = {
+    "default": "primary",  # Синяя (в интерфейсе мы называли её default)
+    "green": "success",    # Зеленая
+    "red": "danger",       # Красная
+    "purple": "primary",   # Фоллбэк (в API 9.4 пока только 3 цвета, ставим синий)
 }
 
 _TG_SEMAPHORE = asyncio.Semaphore(20)
 
 
-# ── Функция сборки кнопки (Магия Pydantic) ────────────────────────────────
-def _build_color_button(giveaway: Giveaway, giveaway_url: str) -> InlineKeyboardButton:
-    """Собирает кнопку, прокидывая color и text_entities в обход ограничений типизации"""
+# ── Функция сборки кнопки (Telegram Bot API 9.4) ────────────────────────
+def _build_color_button(giveaway: "Giveaway", giveaway_url: str):
     from aiogram.types import InlineKeyboardButton
 
     btn_text = giveaway.button_text
-    btn_kwargs = {"url": giveaway_url}
-
-    # 1. Обработка цвета
-    color_str = getattr(giveaway, "button_color", "default") or "default"
-    color_int = BUTTON_COLOR_MAP.get(color_str)
-    if color_int is not None:
-        btn_kwargs["color"] = color_int  # Улетит в Telegram благодаря extra="allow"
-
-    # 2. Обработка Эмодзи
     custom_emoji_id = getattr(giveaway, "button_custom_emoji_id", None)
-    if custom_emoji_id:
-        # Кастомный Telegram Premium Emoji
-        btn_kwargs["text"] = f"⭐ {btn_text}" # ⭐ будет заменена телеграмом на custom emoji
-        btn_kwargs["text_entities"] =[{
-            "type": "custom_emoji",
-            "offset": 0,
-            "length": 2, # ⭐ + пробел
-            "custom_emoji_id": custom_emoji_id
-        }]
-    else:
-        # Обычный эмодзи (или без него)
+    
+    # Если премиум-иконки нет, а выбран обычный эмодзи — склеиваем его с текстом
+    if not custom_emoji_id:
         emoji = getattr(giveaway, "button_color_emoji", "")
-        # Убираем лишние пробелы, если эмодзи нет
-        btn_kwargs["text"] = f"{emoji} {btn_text}".strip()
+        # Игнорируем плейсхолдер ⭐, если он случайно прилетел со старого фронта
+        if emoji and emoji != "⭐": 
+            btn_text = f"{emoji} {btn_text}".strip()
 
-    # Pydantic v2 проглотит color и text_entities и сам сгенерирует валидный JSON
-    return InlineKeyboardButton(**btn_kwargs)
+    # Создаем базовую кнопку
+    btn = InlineKeyboardButton(text=btn_text, url=giveaway_url)
+
+    # Инициализируем хранилище дополнительных полей Pydantic (Aiogram 3.x)
+    if getattr(btn, "__pydantic_extra__", None) is None:
+        btn.__pydantic_extra__ = {}
+
+    # 1. Применяем стиль (цвет кнопки)
+    color_str = getattr(giveaway, "button_color", "default")
+    style = BUTTON_STYLE_MAP.get(color_str)
+    if style:
+        btn.__pydantic_extra__["style"] = style
+
+    # 2. Применяем кастомную иконку Telegram Premium
+    if custom_emoji_id:
+        btn.__pydantic_extra__["icon_custom_emoji_id"] = custom_emoji_id
+
+    return btn
 
 
 # ── Обновленный метод отправки ───────────────────────────────────────────
