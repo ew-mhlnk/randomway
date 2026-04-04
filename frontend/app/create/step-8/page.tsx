@@ -1,125 +1,86 @@
+/* frontend/app/create/step-8/page.tsx */
 'use client';
-
 import { useRouter } from 'next/navigation';
 import { useTelegram } from '@/app/providers/TelegramProvider';
 import { useGiveawayStore } from '@/store/useGiveawayStore';
+import PageHeader from '@/components/PageHeader';
+import GradientButton from '@/components/GradientButton';
+import { ToggleCard } from '@/components/ToggleCard';
+
+const PRESETS = [5, 10, 25, 50];
 
 export default function Step8Page() {
   const router = useRouter();
   const { haptic } = useTelegram();
   const store = useGiveawayStore();
 
-  const handleNext = () => {
-    haptic?.impactOccurred('medium');
-    router.push('/create/step-9');
-  };
-
   return (
-    <main className="p-4 flex flex-col gap-6 animate-in fade-in slide-in-from-right-4 duration-300">
-      <div>
-        <h2 className="text-xl font-bold text-(--text-primary)">Пригласить друзей 👥</h2>
-        <p className="text-sm text-(--text-secondary) mt-1">
-          Реферальная система — каждый приглашённый даёт +1 шанс на победу.
+    <div style={{ minHeight: '100vh', background: '#0B0B0B', display: 'flex', flexDirection: 'column' }}>
+      <PageHeader title="Пригласить друзей" />
+      <main style={{ flex: 1, padding: '20px 16px 120px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <p style={{ fontSize: 13, color: '#7D7D7D', paddingLeft: 4 }}>
+          Каждый приглашённый даёт +1 шанс на победу.
         </p>
-      </div>
 
-      {/* Тумблер: включить/выключить */}
-      <div className="glass-card p-4 rounded-xl flex items-center justify-between">
-        <div className="pr-4">
-          <h3 className="font-medium text-[16px] text-(--text-primary)">Включить приглашения</h3>
-          <p className="text-xs text-(--text-secondary) mt-1">
-            Участник получает уникальную реферальную ссылку.
-            За каждого приглашённого — дополнительный шанс.
-          </p>
-        </div>
-        <button
-          onClick={() => {
-            haptic?.selectionChanged();
-            store.updateField('useInvites', !store.useInvites);
-          }}
-          className={`shrink-0 w-12 h-7 rounded-full transition-colors relative ${
-            store.useInvites ? 'bg-(--accent-blue)' : 'bg-gray-600'
-          }`}
-        >
-          <div
-            className={`w-5 h-5 bg-white rounded-full absolute top-1 transition-transform ${
-              store.useInvites ? 'translate-x-6' : 'translate-x-1'
-            }`}
-          />
-        </button>
-      </div>
+        <ToggleCard
+          title="Включить приглашения"
+          description="Участник получает уникальную реферальную ссылку. За каждого приглашённого — дополнительный шанс."
+          value={store.useInvites}
+          onChange={() => { haptic?.selectionChanged(); store.updateField('useInvites', !store.useInvites); }}
+        />
 
-      {/* Лимит приглашений — только если включено */}
-      {store.useInvites && (
-        <div className="glass-card p-4 rounded-xl flex flex-col gap-3">
-          <label className="text-sm font-medium text-(--text-secondary)">
-            Максимум приглашений от одного участника
-          </label>
-          <p className="text-xs text-(--text-secondary) -mt-2">
-            Ограничение защищает от накрутки. Рекомендуем: 10–50.
-          </p>
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => {
-                haptic?.selectionChanged();
-                store.updateField('maxInvites', Math.max(1, store.maxInvites - 1));
-              }}
-              className="w-12 h-12 rounded-full bg-white/5 text-2xl active:scale-95 transition-transform"
-            >
-              -
-            </button>
+        {store.useInvites && (
+          <div style={{ background: '#2E2F33', borderRadius: 22, padding: '18px 16px',
+            display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div>
+              <p style={{ fontSize: 13, fontWeight: 600, color: '#fff', marginBottom: 4 }}>
+                Макс. приглашений от одного участника
+              </p>
+              <p style={{ fontSize: 11, color: '#7D7D7D' }}>
+                Ограничение защищает от накрутки. Рекомендуем: 10–50.
+              </p>
+            </div>
 
-            <input
-              type="number"
-              min="1"
-              max="1000"
-              value={store.maxInvites || ''}
-              onChange={(e) =>
-                store.updateField('maxInvites', parseInt(e.target.value) || 1)
-              }
-              className="w-24 bg-transparent text-center text-4xl font-bold text-(--text-primary) outline-none"
-            />
-
-            <button
-              onClick={() => {
-                haptic?.selectionChanged();
-                store.updateField('maxInvites', store.maxInvites + 1);
-              }}
-              className="w-12 h-12 rounded-full bg-(--accent-blue) text-white text-2xl active:scale-95 transition-transform"
-            >
-              +
-            </button>
-          </div>
-
-          <div className="flex gap-2 mt-1 flex-wrap">
-            {[5, 10, 25, 50].map((preset) => (
-              <button
-                key={preset}
-                onClick={() => {
-                  haptic?.selectionChanged();
-                  store.updateField('maxInvites', preset);
-                }}
-                className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${
-                  store.maxInvites === preset
-                    ? 'bg-(--accent-blue) text-white'
-                    : 'bg-white/5 text-(--text-secondary)'
-                }`}
-              >
-                {preset}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 18 }}>
+              <button onClick={() => { haptic?.selectionChanged(); store.updateField('maxInvites', Math.max(1, store.maxInvites - 1)); }}
+                style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(255,255,255,0.07)',
+                  border: '1px solid rgba(255,255,255,0.1)', color: '#fff', fontSize: 22, cursor: 'pointer' }}>
+                −
               </button>
-            ))}
-          </div>
-        </div>
-      )}
+              <input type="number" min={1} max={1000} value={store.maxInvites || ''}
+                onChange={e => store.updateField('maxInvites', parseInt(e.target.value) || 1)}
+                style={{ width: 80, background: 'transparent', border: 'none',
+                  textAlign: 'center', fontSize: 40, fontWeight: 700, color: '#fff', outline: 'none' }} />
+              <button onClick={() => { haptic?.selectionChanged(); store.updateField('maxInvites', store.maxInvites + 1); }}
+                style={{ width: 44, height: 44, borderRadius: '50%', background: '#0095FF',
+                  border: 'none', color: '#fff', fontSize: 22, cursor: 'pointer' }}>
+                +
+              </button>
+            </div>
 
-      <div className="fixed bottom-0 left-0 right-0 p-4 bg-(--bg-primary)/80 backdrop-blur-md pb-8">
-        <button
-          onClick={handleNext}
-          className="w-full h-14 rounded-2xl font-bold text-[16px] gradient-btn shadow-lg"
-        >
-          Далее
-        </button>
+            {/* Пресеты */}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+              {PRESETS.map(v => (
+                <button key={v} onClick={() => { haptic?.selectionChanged(); store.updateField('maxInvites', v); }}
+                  style={{ padding: '7px 16px', borderRadius: 20, fontSize: 13, fontWeight: 500,
+                    cursor: 'pointer', transition: 'all 0.14s',
+                    background: store.maxInvites === v ? 'rgba(0,149,255,0.18)' : 'rgba(255,255,255,0.06)',
+                    border: store.maxInvites === v ? '1px solid #0095FF' : '1px solid rgba(255,255,255,0.10)',
+                    color: store.maxInvites === v ? '#0095FF' : 'rgba(255,255,255,0.6)' }}>
+                  {v}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </main>
+
+      <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, padding: '12px 16px 28px',
+        background: 'linear-gradient(to top, #0B0B0B 70%, transparent)' }}>
+        <GradientButton onClick={() => { haptic?.impactOccurred('medium'); router.push('/create/step-9'); }}>
+          Далее →
+        </GradientButton>
       </div>
-    </main>
+    </div>
   );
 }

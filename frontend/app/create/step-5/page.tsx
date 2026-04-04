@@ -1,8 +1,22 @@
+/* frontend/app/create/step-5/page.tsx */
 'use client';
-
 import { useRouter } from 'next/navigation';
 import { useTelegram } from '@/app/providers/TelegramProvider';
 import { useGiveawayStore } from '@/store/useGiveawayStore';
+import PageHeader from '@/components/PageHeader';
+import GradientButton from '@/components/GradientButton';
+
+function Label({ children }: { children: React.ReactNode }) {
+  return <p style={{ fontSize: 10, color: '#424141', marginBottom: 7, paddingLeft: 4 }}>{children}</p>;
+}
+
+const inputStyle: React.CSSProperties = {
+  width: '100%', height: 44, background: '#202020', borderRadius: 15,
+  border: '1px solid rgba(255,255,255,0.06)', padding: '0 14px',
+  /* font-size 16px задан глобально в globals.css — iOS не зумит */
+  color: '#fff', outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit',
+  colorScheme: 'dark',
+};
 
 export default function Step5Page() {
   const router = useRouter();
@@ -11,78 +25,69 @@ export default function Step5Page() {
 
   const handleNext = () => {
     if (!store.startImmediately && !store.startDate) {
-      return window.Telegram?.WebApp.showAlert("Выберите дату начала розыгрыша");
+      window.Telegram?.WebApp.showAlert('Выберите дату начала'); return;
     }
     if (!store.endDate) {
-      return window.Telegram?.WebApp.showAlert("Выберите дату окончания розыгрыша");
+      window.Telegram?.WebApp.showAlert('Выберите дату окончания'); return;
     }
-    
-    // Проверка, что дата окончания больше даты начала
     const start = store.startImmediately ? new Date() : new Date(store.startDate!);
     const end = new Date(store.endDate);
     if (end <= start) {
-      return window.Telegram?.WebApp.showAlert("Дата окончания должна быть позже даты начала!");
+      window.Telegram?.WebApp.showAlert('Дата окончания должна быть позже начала'); return;
     }
-
     haptic?.impactOccurred('medium');
     router.push('/create/step-6');
   };
 
   return (
-    <main className="p-4 pb-24 flex flex-col gap-6 animate-in fade-in slide-in-from-right-4 duration-300">
-      <div>
-        <h2 className="text-xl font-bold text-(--text-primary)">Даты проведения</h2>
-        <p className="text-sm text-(--text-secondary) mt-1">
+    <div style={{ minHeight: '100vh', background: '#0B0B0B', display: 'flex', flexDirection: 'column' }}>
+      <PageHeader title="Даты проведения" />
+
+      <main style={{ flex: 1, padding: '20px 16px 120px', display: 'flex', flexDirection: 'column', gap: 18 }}>
+        <p style={{ fontSize: 13, color: '#7D7D7D', paddingLeft: 4 }}>
           Когда запустить и когда подвести итоги?
         </p>
-      </div>
 
-      {/* Тумблер: Начать сразу */}
-      <div className="glass-card p-4 rounded-xl flex items-center justify-between">
+        {/* Тумблер: начать сразу */}
+        <div style={{ background: '#2E2F33', borderRadius: 22, padding: '16px',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <p style={{ fontSize: 15, fontWeight: 600, color: '#fff' }}>Начать сразу</p>
+            <p style={{ fontSize: 11, color: '#7D7D7D', marginTop: 3 }}>Опубликовать пост прямо сейчас</p>
+          </div>
+          <button onClick={() => { haptic?.selectionChanged(); store.updateField('startImmediately', !store.startImmediately); }}
+            style={{ width: 48, height: 28, borderRadius: 14, flexShrink: 0, cursor: 'pointer',
+              background: store.startImmediately ? '#0095FF' : 'rgba(255,255,255,0.12)',
+              border: 'none', position: 'relative', transition: 'background 0.2s' }}>
+            <div style={{ width: 22, height: 22, background: '#fff', borderRadius: '50%',
+              position: 'absolute', top: 3, transition: 'left 0.2s',
+              left: store.startImmediately ? 23 : 3 }} />
+          </button>
+        </div>
+
+        {/* Дата начала */}
+        {!store.startImmediately && (
+          <div>
+            <Label>Дата и время начала</Label>
+            <input type="datetime-local" style={inputStyle}
+              value={store.startDate || ''}
+              onChange={e => store.updateField('startDate', e.target.value)} />
+          </div>
+        )}
+
+        {/* Дата окончания */}
         <div>
-          <h3 className="font-medium text-[16px] text-(--text-primary)">Начать сразу</h3>
-          <p className="text-xs text-(--text-secondary) mt-1">Опубликовать пост прямо сейчас</p>
+          <Label>Дата и время завершения (МСК)</Label>
+          <input type="datetime-local" style={inputStyle}
+            value={store.endDate || ''}
+            onChange={e => store.updateField('endDate', e.target.value)} />
         </div>
-        <button 
-          onClick={() => {
-            haptic?.selectionChanged();
-            store.updateField('startImmediately', !store.startImmediately);
-          }}
-          className={`w-12 h-7 rounded-full transition-colors relative ${store.startImmediately ? 'bg-(--accent-blue)' : 'bg-gray-600'}`}
-        >
-          <div className={`w-5 h-5 bg-white rounded-full absolute top-1 transition-transform ${store.startImmediately ? 'translate-x-6' : 'translate-x-1'}`} />
-        </button>
-      </div>
+      </main>
 
-      {/* Выбор даты начала (если не сразу) */}
-      {!store.startImmediately && (
-        <div className="glass-card p-4 rounded-xl flex flex-col gap-2">
-          <label className="text-sm font-medium text-(--text-secondary)">Дата и время начала</label>
-          <input 
-            type="datetime-local" 
-            value={store.startDate || ''}
-            onChange={(e) => store.updateField('startDate', e.target.value)}
-            className="w-full bg-transparent border border-white/10 rounded-lg p-3 text-(--text-primary) outline-none focus:border-(--accent-blue)"
-          />
-        </div>
-      )}
-
-      {/* Выбор даты окончания */}
-      <div className="glass-card p-4 rounded-xl flex flex-col gap-2">
-        <label className="text-sm font-medium text-(--text-secondary)">Дата и время завершения (МСК)</label>
-        <input 
-          type="datetime-local" 
-          value={store.endDate || ''}
-          onChange={(e) => store.updateField('endDate', e.target.value)}
-          className="w-full bg-transparent border border-white/10 rounded-lg p-3 text-(--text-primary) outline-none focus:border-(--accent-blue)"
-        />
+      <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, padding: '12px 16px 28px',
+        background: 'linear-gradient(to top, #0B0B0B 70%, transparent)' }}>
+        <GradientButton onClick={handleNext}>Далее →</GradientButton>
       </div>
-
-      <div className="fixed bottom-0 left-0 right-0 p-4 bg-(--bg-primary)/80 backdrop-blur-md pb-8">
-        <button onClick={handleNext} className="w-full h-14 rounded-2xl font-bold text-[16px] gradient-btn shadow-lg">
-          Далее
-        </button>
-      </div>
-    </main>
+    </div>
   );
 }

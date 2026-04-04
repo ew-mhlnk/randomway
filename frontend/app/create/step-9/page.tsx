@@ -1,43 +1,37 @@
+/* frontend/app/create/step-9/page.tsx */
 'use client';
 import { useRouter } from 'next/navigation';
 import { useTelegram } from '@/app/providers/TelegramProvider';
 import { useGiveawayStore } from '@/store/useGiveawayStore';
+import PageHeader from '@/components/PageHeader';
+import GradientButton from '@/components/GradientButton';
+import { ToggleCard } from '@/components/ToggleCard';
 
 export default function Step9Page() {
   const router = useRouter();
   const { haptic } = useTelegram();
   const store = useGiveawayStore();
 
-  const handleNext = () => {
-    haptic?.impactOccurred('medium');
-    router.push('/create/step-10'); // Следующий шаг: Капча
-  };
-
   return (
-    <main className="p-4 flex flex-col gap-6 animate-in fade-in slide-in-from-right-4 duration-300">
-      <div>
-        <h2 className="text-xl font-bold text-(--text-primary)">Stories (Истории) 📸</h2>
-        <p className="text-sm text-(--text-secondary) mt-1">Виральный охват для вашего розыгрыша.</p>
+    <div style={{ minHeight: '100vh', background: '#0B0B0B', display: 'flex', flexDirection: 'column' }}>
+      <PageHeader title="Stories" />
+      <main style={{ flex: 1, padding: '20px 16px 120px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <p style={{ fontSize: 13, color: '#7D7D7D', paddingLeft: 4 }}>
+          Виральный охват для вашего розыгрыша.
+        </p>
+        <ToggleCard
+          title="Постинг Stories 📸"
+          description="Участник выкладывает историю с реферальной ссылкой. За каждый переход по ней — +1 шанс на победу."
+          value={store.useStories}
+          onChange={() => { haptic?.selectionChanged(); store.updateField('useStories', !store.useStories); }}
+        />
+      </main>
+      <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, padding: '12px 16px 28px',
+        background: 'linear-gradient(to top, #0B0B0B 70%, transparent)' }}>
+        <GradientButton onClick={() => { haptic?.impactOccurred('medium'); router.push('/create/step-10'); }}>
+          Далее →
+        </GradientButton>
       </div>
-
-      <div className="glass-card p-4 rounded-xl flex items-center justify-between">
-        <div className="pr-4">
-          <h3 className="font-medium text-[16px] text-(--text-primary)">Постинг Stories</h3>
-          <p className="text-xs text-(--text-secondary) mt-1">
-            Участник должен выложить историю в Telegram со специальной ссылкой-стикером. За переходы по ней он получит +1 шанс.
-          </p>
-        </div>
-        <button 
-          onClick={() => { haptic?.selectionChanged(); store.updateField('useStories', !store.useStories); }}
-          className={`shrink-0 w-12 h-7 rounded-full transition-colors relative ${store.useStories ? 'bg-(--accent-blue)' : 'bg-gray-600'}`}
-        >
-          <div className={`w-5 h-5 bg-white rounded-full absolute top-1 transition-transform ${store.useStories ? 'translate-x-6' : 'translate-x-1'}`} />
-        </button>
-      </div>
-
-      <div className="fixed bottom-0 left-0 right-0 p-4 bg-(--bg-primary)/80 backdrop-blur-md pb-8">
-        <button onClick={handleNext} className="w-full h-14 rounded-2xl font-bold text-[16px] gradient-btn shadow-lg">Далее</button>
-      </div>
-    </main>
+    </div>
   );
 }

@@ -2,7 +2,15 @@
 
 @import "tailwindcss";
 
-/* ─── Animated rotating border ────────────────────────────────────────────── */
+/* ── Предотвращаем iOS zoom при фокусе на input ────────────────────────
+   iOS Safari зумит страницу когда font-size < 16px на input/textarea/select.
+   Устанавливаем 16px глобально — визуально меняем только размер шрифта
+   в input-е, не всей страницы. ────────────────────────────────────────── */
+input, textarea, select {
+  font-size: 16px !important;
+}
+
+/* ── Animated rotating border ──────────────────────────────────────────── */
 @property --btn-angle {
   syntax: '<angle>';
   initial-value: 0deg;
@@ -14,42 +22,36 @@
   to   { --btn-angle: 360deg; }
 }
 
-/* Применяется к любой кнопке с анимированным бордером */
 .animated-border-btn {
   background:
     linear-gradient(90deg, #0095FF 0%, #FF09D2 100%) padding-box,
     conic-gradient(
       from var(--btn-angle),
       transparent 0%,
-      rgba(255, 255, 255, 0.95) 6%,
-      rgba(255, 255, 255, 0.3)  10%,
+      rgba(255,255,255,0.95) 6%,
+      rgba(255,255,255,0.3)  10%,
       transparent 16%
     ) border-box;
   border: 2px solid transparent;
   animation: spin-border 2.4s linear infinite;
 }
 
-/* ─── Единая тёмная тема (#0B0B0B) ────────────────────────────────────────── */
-/* Только тёмный режим — без светлой темы */
+/* ── Единая тёмная тема ─────────────────────────────────────────────────── */
 :root,
 :root.dark {
   --bg-primary:       #0B0B0B;
   --bg-card:          #2E2F33;
   --bg-card-hover:    #383A3F;
-  --bg-overlay:       rgba(255, 255, 255, 0.07);
+  --bg-overlay:       rgba(255,255,255,0.07);
   --text-primary:     #ffffff;
   --text-secondary:   #7D7D7D;
-  --text-hint:        rgba(255, 255, 255, 0.4);
-  --border-glass:     rgba(255, 255, 255, 0.08);
-  --border-glass-mid: rgba(255, 255, 255, 0.14);
+  --border-glass:     rgba(255,255,255,0.08);
+  --border-glass-mid: rgba(255,255,255,0.14);
   --accent-blue:      #0095FF;
   --accent-pink:      #FF09D2;
   --accent-gradient:  linear-gradient(90deg, #0095FF 0%, #FF09D2 100%);
-  --radius-card:      22px;
-  --radius-btn:       30px;
 }
 
-/* Форсируем тёмный фон на уровне html/body */
 html, body {
   background-color: var(--bg-primary) !important;
   color: var(--text-primary);
@@ -58,7 +60,7 @@ html, body {
   overscroll-behavior: none;
 }
 
-/* ─── Утилиты ──────────────────────────────────────────────────────────────── */
+/* ── Утилиты ────────────────────────────────────────────────────────────── */
 .gradient-btn {
   background: var(--accent-gradient);
   color: #ffffff;
@@ -73,10 +75,9 @@ html, body {
 }
 .glass-card:active { background: var(--bg-card-hover); transform: scale(0.985); }
 
-/* Глассморфный оверлей (для кнопки Назад и т.д.) */
 .glass-circle {
-  background: rgba(255, 255, 255, 0.10);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255,255,255,0.10);
+  border: 1px solid rgba(255,255,255,0.15);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
 }

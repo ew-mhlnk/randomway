@@ -1,45 +1,48 @@
+/* frontend/app/create/step-10/page.tsx */
 'use client';
 import { useRouter } from 'next/navigation';
 import { useTelegram } from '@/app/providers/TelegramProvider';
 import { useGiveawayStore } from '@/store/useGiveawayStore';
+import PageHeader from '@/components/PageHeader';
+import GradientButton from '@/components/GradientButton';
+import { ToggleCard } from '@/components/ToggleCard';
 
 export default function Step10Page() {
   const router = useRouter();
   const { haptic } = useTelegram();
   const store = useGiveawayStore();
 
-  const handleNext = () => {
-    haptic?.impactOccurred('medium');
-    router.push('/create/step-11'); // Переходим к финалу!
-  };
-
   return (
-    <main className="p-4 flex flex-col gap-6 animate-in fade-in slide-in-from-right-4 duration-300">
-      <div>
-        <h2 className="text-xl font-bold text-(--text-primary)">Защита от ботов 🤖</h2>
-        <p className="text-sm text-(--text-secondary) mt-1">Отсеките фермы ботов и призоловов.</p>
-      </div>
+    <div style={{ minHeight: '100vh', background: '#0B0B0B', display: 'flex', flexDirection: 'column' }}>
+      <PageHeader title="Защита от ботов" />
+      <main style={{ flex: 1, padding: '20px 16px 120px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <p style={{ fontSize: 13, color: '#7D7D7D', paddingLeft: 4 }}>
+          Отсеките фермы ботов и призоловов.
+        </p>
+        <ToggleCard
+          title="Cloudflare Turnstile 🤖"
+          description="Невидимая капча. Участникам нужно нажать одну кнопку — боты не пройдут."
+          value={store.useCaptcha}
+          onChange={() => { haptic?.selectionChanged(); store.updateField('useCaptcha', !store.useCaptcha); }}
+        />
 
-      <div className="glass-card p-4 rounded-xl flex items-center justify-between">
-        <div className="pr-4">
-          <h3 className="font-medium text-[16px] text-(--text-primary)">Cloudflare Turnstile</h3>
-          <p className="text-xs text-(--text-secondary) mt-1">
-            Невидимая капча. Участникам нужно будет просто нажать одну кнопку в приложении. Боты не пройдут.
-          </p>
-        </div>
-        <button 
-          onClick={() => { haptic?.selectionChanged(); store.updateField('useCaptcha', !store.useCaptcha); }}
-          className={`shrink-0 w-12 h-7 rounded-full transition-colors relative ${store.useCaptcha ? 'bg-(--accent-blue)' : 'bg-gray-600'}`}
-        >
-          <div className={`w-5 h-5 bg-white rounded-full absolute top-1 transition-transform ${store.useCaptcha ? 'translate-x-6' : 'translate-x-1'}`} />
-        </button>
+        {store.useCaptcha && (
+          <div style={{ background: 'rgba(0,149,255,0.08)', borderRadius: 16, padding: '12px 14px',
+            border: '1px solid rgba(0,149,255,0.2)' }}>
+            <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)', lineHeight: 1.5 }}>
+              ✅ Для работы капчи убедитесь, что переменная{' '}
+              <span style={{ fontFamily: 'monospace', color: '#0095FF' }}>TURNSTILE_SECRET_KEY</span>{' '}
+              задана в настройках сервера.
+            </p>
+          </div>
+        )}
+      </main>
+      <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, padding: '12px 16px 28px',
+        background: 'linear-gradient(to top, #0B0B0B 70%, transparent)' }}>
+        <GradientButton onClick={() => { haptic?.impactOccurred('medium'); router.push('/create/step-11'); }}>
+          Перейти к публикации →
+        </GradientButton>
       </div>
-
-      <div className="fixed bottom-0 left-0 right-0 p-4 bg-(--bg-primary)/80 backdrop-blur-md pb-8">
-        <button onClick={handleNext} className="w-full h-14 rounded-2xl font-bold text-[16px] gradient-btn shadow-lg">
-          Перейти к публикации
-        </button>
-      </div>
-    </main>
+    </div>
   );
 }
