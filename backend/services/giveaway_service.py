@@ -1,11 +1,4 @@
-"""backend/services/giveaway_service.py
-
-Ключевые изменения:
-1. Поле кнопки — style (не color), Bot API 9.4, значения: 1=green, 2=red, 3=blue
-2. Флоу публикации: сначала сообщение в бот с деталями → inline-кнопки Принять/Отмена
-   → при Принять — публикация в каналы
-3. boost_channel_ids — каналы для обязательного буста
-"""
+"""backend/services/giveaway_service.py"""
 
 import os
 import asyncio
@@ -18,6 +11,7 @@ from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramRetryAfter
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from database import AsyncSessionLocal
 from models import Giveaway, PostTemplate, Channel
@@ -27,55 +21,52 @@ from repositories.channel_repo import channel_repo
 from celery_app import celery
 
 # ── Bot API 9.4: поле style в InlineKeyboardButton ────────────────────────
-# 1 = green, 2 = red, 3 = blue (default = не передаём поле)
-BUTTON_STYLE_MAP: dict[str, int | None] = {
-    "default": None,   # прозрачная / стандартная
-    "green":   1,
-    "red":     2,
-    "blue":    3,
+# Значения: "success" (зеленый), "danger" (красный), "primary" (синий)
+BUTTON_STYLE_MAP: dict[str, str | None] = {
+    "default": "primary",  
+    "green":   "success",
+    "red":     "danger",
+    "blue":    "primary",
 }
 
 _TG_SEMAPHORE = asyncio.Semaphore(20)
 
 
-def _make_join_button(text: str, url: str, color: str, custom_emoji_id: str | None) -> dict:
-    """Собирает dict кнопки с полем style (Bot API 9.4) и опциональным custom emoji."""
-    btn: dict = {"text": text, "url": url}
+def _make_join_button(text: str, url: str, color: str, custom_emoji_id: str | None) -> InlineKeyboardButton:
+    """Собирает объект кнопки с поддержкой style и icon_custom_emoji_id (Bot API 9.4)"""
+    btn = InlineKeyboardButton(text=text, url=url)
+    
+    # Инициализируем хранилище скрытых полей Pydantic (взлом Aiogram для передачи новых фич)
+    if getattr(btn, "__pydantic_extra__", None) is None:
+        btn.__pydantic_extra__ = {}
 
     style = BUTTON_STYLE_MAP.get(color)
-    if style is not None:
-        btn["style"] = style  # ← правильное поле по Bot API 9.4
+    if style:
+        btn.__pydantic_extra__["style"] = style
 
-    # Bot API 9.4: icon_custom_emoji_id в InlineKeyboardButton
     if custom_emoji_id:
-        btn["icon_custom_emoji_id"] = custom_emoji_id
+        btn.__pydantic_extra__["icon_custom_emoji_id"] = custom_emoji_id
 
     return btn
 
 
 async def _send_post(bot: Bot, chat_id: int, template: PostTemplate,
-                     keyboard: dict, parse_mode: str = "HTML") -> int | None:
-    """Отправляет пост в чат с inline-клавиатурой. Возвращает message_id."""
-    params = {"chat_id": chat_id, "reply_markup": keyboard, "parse_mode": parse_mode}
-    method, media_param = "sendMessage", None
-
-    if template.media_type == "photo":
-        method, media_param = "sendPhoto", ("photo", template.media_id)
-        params["caption"] = template.text
-    elif template.media_type == "video":
-        method, media_param = "sendVideo", ("video", template.media_id)
-        params["caption"] = template.text
-    elif template.media_type == "animation":
-        method, media_param = "sendAnimation", ("animation", template.media_id)
-        params["caption"] = template.text
-    else:
-        params["text"] = template.text
-
-    if media_param:
-        params[media_param[0]] = media_param[1]
-
-    result = await bot.session.make_request(bot.token, method, params)
-    return result.get("message_id") if isinstance(result, dict) else None
+                     keyboard: InlineKeyboardMarkup, parse_mode: str = "HTML") -> int | None:
+    """Отправляет пост в чат с inline-клавиатурой стандартными методами Aiogram."""
+    try:
+        if template.media_type == "photo":
+            msg = await bot.send_photo(chat_id=chat_id, photo=template.media_id, caption=template.text, reply_markup=keyboard, parse_mode=parse_mode)
+        elif template.media_type == "video":
+            msg = await bot.send_video(chat_id=chat_id, video=template.media_id, caption=template.text, reply_markup=keyboard, parse_mode=parse_mode)
+        elif template.media_type == "animation":
+            msg = await bot.send_animation(chat_id=chat_id, animation=template.media_id, caption=template.text, reply_markup=keyboard, parse_mode=parse_mode)
+        else:
+            msg = await bot.send_message(chat_id=chat_id, text=template.text, reply_markup=keyboard, parse_mode=parse_mode)
+        
+        return msg.message_id
+    except Exception as e:
+        logging.error(f"Ошибка _send_post для {chat_id}: {e}")
+        return None
 
 
 async def _check_member_safe(bot: Bot, chat_id: int, user_id: int) -> bool:
@@ -84,7 +75,7 @@ async def _check_member_safe(bot: Bot, chat_id: int, user_id: int) -> bool:
             try:
                 member = await asyncio.wait_for(
                     bot.get_chat_member(chat_id=chat_id, user_id=user_id), timeout=5.0)
-                return member.status not in ["left", "kicked", "banned"]
+                return member.status not in["left", "kicked", "banned"]
             except TelegramRetryAfter as e:
                 await asyncio.sleep(e.retry_after + 1)
             except asyncio.TimeoutError:
@@ -100,11 +91,7 @@ class GiveawayService:
     async def send_confirmation_to_bot(
         self, db: AsyncSession, bot: Bot, user_id: int, giveaway_id: int
     ) -> None:
-        """
-        Отправляет создателю в бот:
-        1. Его пост (reply)
-        2. Сообщение с деталями розыгрыша + кнопками Принять/Отмена
-        """
+        """Отправляет создателю в бот превью поста и кнопки Принять/Отмена"""
         giveaway = await giveaway_repo.get_by_id(db, giveaway_id)
         if not giveaway:
             return
@@ -114,12 +101,11 @@ class GiveawayService:
         if not template:
             return
 
-        # Загружаем каналы для отображения
         async def channel_lines(ids: list[int]) -> str:
             if not ids:
                 return "  —"
             channels = await channel_repo.get_by_ids(db, ids)
-            lines = []
+            lines =[]
             for i, ch in enumerate(channels, 1):
                 link = f"https://t.me/{ch.username}" if ch.username else f"https://t.me/c/{str(ch.telegram_id).replace('-100','')}/0"
                 lines.append(f"{i}. 🎲 {ch.title} ({link})")
@@ -128,28 +114,27 @@ class GiveawayService:
         sponsor_lines = await channel_lines(giveaway.sponsor_channel_ids)
         publish_lines = await channel_lines(giveaway.publish_channel_ids)
         result_lines  = await channel_lines(giveaway.result_channel_ids)
-        boost_lines   = await channel_lines(giveaway.boost_channel_ids or [])
+        boost_lines   = await channel_lines(giveaway.boost_channel_ids or[])
 
         start_str = "Начнётся сразу" if giveaway.start_immediately else (
             giveaway.start_date.strftime("%d.%m.%Y, %H:%M GMT+3") if giveaway.start_date else "—")
         end_str = giveaway.end_date.strftime("%d.%m.%Y, %H:%M GMT+3") if giveaway.end_date else "—"
 
-        # Отправляем пост с кнопкой "Участвовать" (превью)
         bot_info = await bot.get_me()
         app_short = os.getenv("MINI_APP_SHORT_NAME", "app")
         giveaway_url = f"https://t.me/{bot_info.username}/{app_short}?startapp=gw_{giveaway.id}"
 
+        # 1. Отправляем пост-превью
         join_btn = _make_join_button(
-            text=f"{giveaway.button_color_emoji} {giveaway.button_text}",
+            text=f"{giveaway.button_color_emoji} {giveaway.button_text}".strip(),
             url=giveaway_url,
             color=giveaway.button_color,
             custom_emoji_id=giveaway.button_custom_emoji_id,
         )
-        post_keyboard = {"inline_keyboard": [[join_btn]]}
-
+        post_keyboard = InlineKeyboardMarkup(inline_keyboard=[[join_btn]])
         post_msg_id = await _send_post(bot, user_id, template, post_keyboard)
 
-        # Текст с деталями
+        # 2. Текст с деталями
         details = (
             f"👆🏻 Ваш пост 👆🏻\n\n"
             f"ℹ️ <b>Информация о розыгрыше:</b>\n"
@@ -169,7 +154,6 @@ class GiveawayService:
         if giveaway.use_boosts and giveaway.boost_channel_ids:
             details += f"\n\n🔍 <b>Каналы для буста:</b>\n{boost_lines}"
 
-        # Подтверждающее сообщение (reply к посту если получилось)
         confirm_text = (
             "\n\nВаш розыгрыш готов к запуску! Пожалуйста, проверьте всё ещё раз "
             "и нажмите «Принять», чтобы создать розыгрыш.\n\n"
@@ -178,24 +162,23 @@ class GiveawayService:
             "⚠️ Розыгрыш будет опубликован в выбранные каналы сразу после подтверждения!"
         )
 
-        confirm_keyboard = {
-            "inline_keyboard": [[
-                {"text": "✅ Принять", "callback_data": f"confirm_gw_{giveaway.id}", "style": 1},
-                {"text": "❌ Отмена",  "callback_data": f"cancel_gw_{giveaway.id}",  "style": 2},
-            ]]
-        }
+        # 3. Кнопки подтверждения (с цветами API 9.4)
+        btn_confirm = InlineKeyboardButton(text="✅ Принять", callback_data=f"confirm_gw_{giveaway.id}")
+        btn_confirm.__pydantic_extra__ = {"style": "success"} # Зеленая
 
-        reply_params = {}
-        if post_msg_id:
-            reply_params = {"reply_to_message_id": post_msg_id}
+        btn_cancel = InlineKeyboardButton(text="❌ Отмена", callback_data=f"cancel_gw_{giveaway.id}")
+        btn_cancel.__pydantic_extra__ = {"style": "danger"}   # Красная
 
-        await bot.session.make_request(bot.token, "sendMessage", {
-            "chat_id": user_id,
-            "text": details + confirm_text,
-            "parse_mode": "HTML",
-            "reply_markup": confirm_keyboard,
-            **reply_params,
-        })
+        confirm_keyboard = InlineKeyboardMarkup(inline_keyboard=[[btn_confirm, btn_cancel]])
+
+        # Отправляем сообщение-подтверждение (реплаем на превью поста)
+        await bot.send_message(
+            chat_id=user_id,
+            text=details + confirm_text,
+            parse_mode="HTML",
+            reply_markup=confirm_keyboard,
+            reply_to_message_id=post_msg_id if post_msg_id else None
+        )
 
     # ── Публикация в каналы (вызывается после подтверждения) ──────────────
     async def _post_to_channels_task(self, giveaway_id: int):
@@ -223,12 +206,12 @@ class GiveawayService:
                 url = f"https://t.me/{bot_info.username}/{app_short}?startapp=gw_{giveaway.id}"
 
                 btn = _make_join_button(
-                    text=f"{giveaway.button_color_emoji} {giveaway.button_text}",
+                    text=f"{giveaway.button_color_emoji} {giveaway.button_text}".strip(),
                     url=url,
                     color=giveaway.button_color,
                     custom_emoji_id=giveaway.button_custom_emoji_id,
                 )
-                keyboard = {"inline_keyboard": [[btn]]}
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[[btn]])
 
                 for ch in channels:
                     try:
