@@ -1,9 +1,10 @@
+"""backend/services/participant_service.py"""
 import os
 import aiohttp
+import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from aiogram import Bot
 from fastapi import HTTPException
-import logging
 
 from repositories.giveaway_repo import giveaway_repo
 from repositories.participant_repo import participant_repo
@@ -27,13 +28,34 @@ class ParticipantService:
         if not giveaway:
             raise HTTPException(status_code=400, detail="Розыгрыш не активен или не найден")
 
-        # ── Проверка капчи ────────────────────────────────────────────────────
+        # ── Уже участвует? Возвращаем статус БЕЗ капчи ─────────────────
+        existing = await participant_repo.get_by_user_and_giveaway(db, user_id, giveaway_id)
+        if existing:
+            boost_url = await self._get_boost_url(db, giveaway)
+            return {
+                "status": "already_joined",
+                "giveaway": {
+                    "title":       giveaway.title,
+                    "use_boosts":  giveaway.use_boosts,
+                    "use_invites": giveaway.use_invites,
+                    "use_stories": giveaway.use_stories,
+                    "boost_url":   boost_url,
+                    "max_invites": giveaway.max_invites,
+                },
+                "participant": {
+                    "referral_code": existing.referral_code,
+                    "invite_count":  existing.invite_count,
+                    "has_boosted":   existing.has_boosted,
+                    "boost_count":   getattr(existing, "boost_count", 0),
+                    "story_clicks":  existing.story_clicks,
+                },
+            }
+
+        # ── Капча (только для новых участников) ────────────────────────
         if giveaway.use_captcha:
             captcha_token = payload.get("captcha_token")
             if not captcha_token:
-                raise HTTPException(
-                    status_code=400, detail="Пройдите проверку на робота (Капча)"
-                )
+                raise HTTPException(status_code=400, detail="Пройдите проверку на робота (Капча)")
             secret_key = os.getenv("TURNSTILE_SECRET_KEY")
             if secret_key:
                 async with aiohttp.ClientSession() as session:
@@ -43,84 +65,119 @@ class ParticipantService:
                     ) as resp:
                         outcome = await resp.json()
                         if not outcome.get("success"):
-                            # 🚀 ДОБАВИЛИ ЛОГИРОВАНИЕ ОШИБКИ CLOUDFLARE
-                            logging.error(f"Cloudflare Turnstile Error: {outcome}")
-                            raise HTTPException(
-                                status_code=400, detail="Капча не пройдена. Попробуйте еще раз."
-                            )
+                            logging.error(f"Turnstile error: {outcome}")
+                            raise HTTPException(status_code=400, detail="Капча не пройдена. Попробуйте ещё раз.")
 
-        # ── Проверка подписок ─────────────────────────────────────────────────
+        # ── Проверка подписок ───────────────────────────────────────────
         missing_channels = []
         if giveaway.sponsor_channel_ids:
             channels = await channel_repo.get_by_ids(db, giveaway.sponsor_channel_ids)
             for ch in channels:
                 try:
-                    member = await bot.get_chat_member(
-                        chat_id=ch.telegram_id, user_id=user_id
-                    )
+                    member = await bot.get_chat_member(chat_id=ch.telegram_id, user_id=user_id)
                     if member.status in ["left", "kicked", "banned"]:
                         invite_link = (
-                            f"https://t.me/{ch.username}"
-                            if ch.username
+                            f"https://t.me/{ch.username}" if ch.username
                             else await bot.export_chat_invite_link(ch.telegram_id)
                         )
-                        missing_channels.append(
-                            {"id": ch.id, "title": ch.title, "url": invite_link}
-                        )
+                        missing_channels.append({"id": ch.id, "title": ch.title, "url": invite_link})
                 except Exception as e:
-                    logging.warning(
-                        f"Не удалось проверить подписку для канала {ch.id}: {e}"
-                    )
+                    logging.warning(f"Проверка подписки {ch.id}: {e}")
 
         if missing_channels:
             return {"status": "missing_subscriptions", "channels": missing_channels}
 
-        # ── Регистрация участника ─────────────────────────────────────────────
-        participant = await participant_repo.get_by_user_and_giveaway(
-            db, user_id, giveaway_id
-        )
+        # ── Регистрируем нового участника ───────────────────────────────
+        participant = await participant_repo.create(db, obj_in_data={
+            "giveaway_id": giveaway_id,
+            "user_id":     user_id,
+            "referred_by": ref_code,
+        })
+        if ref_code:
+            await participant_repo.increment_invite(db, ref_code)
 
-        if not participant:
-            participant = await participant_repo.create(
-                db,
-                obj_in_data={
-                    "giveaway_id": giveaway_id,
-                    "user_id": user_id,
-                    "referred_by": ref_code,
-                },
-            )
-            if ref_code:
-                await participant_repo.increment_invite(db, ref_code)
-
-        # Собираем ссылку на Буст (берем первый канал спонсоров)
-        boost_url = None
-        if giveaway.use_boosts and giveaway.sponsor_channel_ids:
-            from sqlalchemy.future import select
-            from models import Channel
-            main_channel = await db.scalar(select(Channel).where(Channel.id == giveaway.sponsor_channel_ids[0]))
-            if main_channel:
-                if main_channel.username:
-                    boost_url = f"https://t.me/boost/{main_channel.username}"
-                else:
-                    c_id = str(main_channel.telegram_id).replace("-100", "")
-                    boost_url = f"https://t.me/boost?c={c_id}"
+        boost_url = await self._get_boost_url(db, giveaway)
 
         return {
             "status": "success",
+            "is_new": True,
             "giveaway": {
-                "title": giveaway.title,
-                "use_boosts": giveaway.use_boosts,
+                "title":       giveaway.title,
+                "use_boosts":  giveaway.use_boosts,
                 "use_invites": giveaway.use_invites,
                 "use_stories": giveaway.use_stories,
-                "boost_url": boost_url
+                "boost_url":   boost_url,
+                "max_invites": giveaway.max_invites,
             },
             "participant": {
                 "referral_code": participant.referral_code,
-                "invite_count": participant.invite_count,
-                "has_boosted": participant.has_boosted,
-                "story_clicks": participant.story_clicks
-            }
+                "invite_count":  participant.invite_count,
+                "has_boosted":   participant.has_boosted,
+                "boost_count":   0,
+                "story_clicks":  participant.story_clicks,
+            },
         }
+
+    async def _get_boost_url(self, db, giveaway) -> str | None:
+        """Возвращает ссылку для буста первого канала из boost_channel_ids (или sponsor)."""
+        if not giveaway.use_boosts:
+            return None
+        # Приоритет: boost_channel_ids → sponsor_channel_ids
+        ids = (giveaway.boost_channel_ids or []) or (giveaway.sponsor_channel_ids or [])
+        if not ids:
+            return None
+        from sqlalchemy.future import select
+        from models import Channel
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as s:
+            ch = await s.scalar(select(Channel).where(Channel.id == ids[0]))
+        if not ch:
+            return None
+        if ch.username:
+            return f"https://t.me/boost/{ch.username}"
+        cid = str(ch.telegram_id).replace("-100", "")
+        return f"https://t.me/boost?c={cid}"
+
+    # ── Проверка бустов — учитываем boost_count ─────────────────────────
+    async def check_boost(self, db: AsyncSession, bot: Bot, giveaway_id: int, user_id: int) -> dict:
+        participant = await participant_repo.get_by_user_and_giveaway(db, user_id, giveaway_id)
+        if not participant:
+            raise HTTPException(status_code=404, detail="Участник не найден")
+
+        from sqlalchemy.future import select
+        from models import Giveaway, Channel
+        giveaway = await db.scalar(select(Giveaway).where(Giveaway.id == giveaway_id))
+        if not giveaway or not giveaway.use_boosts:
+            raise HTTPException(status_code=400, detail="Бусты не включены")
+
+        # Каналы для проверки буста
+        boost_ids = giveaway.boost_channel_ids or giveaway.sponsor_channel_ids or []
+        if not boost_ids:
+            raise HTTPException(status_code=400, detail="Нет каналов для буста")
+
+        channels = await channel_repo.get_by_ids(db, boost_ids)
+        total_boosts = 0
+
+        for ch in channels:
+            try:
+                boosts = await bot.get_user_chat_boosts(chat_id=ch.telegram_id, user_id=user_id)
+                if boosts and boosts.boosts:
+                    total_boosts += len(boosts.boosts)
+            except Exception as e:
+                logging.warning(f"Проверка бустов {ch.id}: {e}")
+
+        if total_boosts > 0:
+            capped = min(total_boosts, 10)
+            participant.has_boosted = True
+            participant.boost_count = capped
+            db.add(participant)
+            await db.commit()
+            return {"status": "success", "boost_count": capped}
+
+        raise HTTPException(
+            status_code=400,
+            detail="Бустов не найдено. Нажмите «Забустить канал» и попробуйте снова через минуту."
+        )
 
 
 participant_service = ParticipantService()

@@ -46,13 +46,39 @@ export default function ChannelPickerStep({
   const handleAddChannel = () => {
     const tg = window.Telegram?.WebApp;
     if (!tg || !initData) return;
-    tg.showPopup({ message: 'Приложение закроется. Добавьте канал и вернитесь.',
-      buttons: [{ id: 'cancel', type: 'cancel', text: 'Отмена' }, { id: 'ok', type: 'default', text: 'ОК' }]
-    }, async (btn: string) => {
-      if (btn !== 'ok') return;
-      await fetch(`${API}/bot/request-channel`, { method: 'POST', headers: { Authorization: `Bearer ${initData}` } });
-      tg.close();
-    });
+    haptic?.impactOccurred('medium');
+
+    // 🚀 ПРОВЕРЯЕМ ПОДДЕРЖКУ НОВОЙ ФИЧИ (Telegram API 9.6)
+    if (typeof (tg as any).requestChat === 'function') {
+      (tg as any).requestChat({
+        chat_is_channel: true, // Показываем только каналы
+      }, (success: boolean) => {
+        if (success) {
+          // Пользователь выбрал канал. Бот получил его в фоне.
+          // Ждем 2 секунды, чтобы бот успел сохранить его в БД, и обновляем список!
+          setLoading(true);
+          setTimeout(() => {
+            fetch(`${API}/channels`, { headers: { Authorization: `Bearer ${initData}` } })
+              .then(r => r.json())
+              .then(d => setChannels(d.channels ||[]))
+              .finally(() => {
+                setLoading(false);
+                haptic?.notificationOccurred('success');
+              });
+          }, 2000);
+        }
+      });
+    } else {
+      // 🐢 ФОЛЛБЭК ДЛЯ СТАРЫХ ВЕРСИЙ TELEGRAM (закрывает мини-апп)
+      tg.showPopup({
+        message: 'Ваш Telegram не поддерживает выбор канала внутри приложения. Мини-апп закроется, а бот пришлет инструкцию.',
+        buttons:[{ id: 'cancel', type: 'cancel', text: 'Отмена' }, { id: 'ok', type: 'default', text: 'ОК' }]
+      }, async (btn: string) => {
+        if (btn !== 'ok') return;
+        await fetch(`${API}/bot/request-channel`, { method: 'POST', headers: { Authorization: `Bearer ${initData}` } });
+        tg.close();
+      });
+    }
   };
 
   const handleNext = () => {

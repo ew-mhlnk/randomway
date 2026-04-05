@@ -26,6 +26,7 @@ from api import api_router
 # ── Импортируем ВСЕ aiogram-handlers и регистрируем в dp ────────────────────
 from handlers import channels as channel_handlers
 from handlers import posts as post_handlers
+from handlers import callbacks as callback_handlers
 # from handlers import participants as participant_handlers  # раскомментить когда создашь
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -50,6 +51,7 @@ dp = Dispatcher(storage=storage)
 # ВАЖНО: порядок имеет значение — более специфичные хендлеры первыми
 dp.include_router(channel_handlers.router)
 dp.include_router(post_handlers.router)
+dp.include_router(callback_handlers.router)
 
 
 @dp.message(CommandStart())

@@ -117,15 +117,36 @@ export default function ChannelsPage() {
     const tg = window.Telegram?.WebApp;
     if (!tg || !initData) return;
     haptic?.impactOccurred('medium');
-    tg.showPopup({ message: 'Приложение закроется. Бот пришлёт инструкцию.',
-      buttons: [{ id: 'cancel', type: 'cancel', text: 'Отмена' }, { id: 'ok', type: 'default', text: 'ОК' }]
-    }, async (btn: string) => {
-      if (btn !== 'ok') return;
-      setAdding(true);
-      await fetch(`${API}/bot/request-channel`, { method: 'POST', headers: { Authorization: `Bearer ${initData}` } })
-        .finally(() => setAdding(false));
-      tg.close();
-    });
+
+    if (typeof (tg as any).requestChat === 'function') {
+      (tg as any).requestChat({
+        chat_is_channel: true,
+      }, (success: boolean) => {
+        if (success) {
+          setAdding(true);
+          setTimeout(() => {
+            fetch(`${API}/channels`, { headers: { Authorization: `Bearer ${initData}` } })
+              .then(r => r.json())
+              .then(d => setChannels(d.channels ??[]))
+              .finally(() => {
+                setAdding(false);
+                haptic?.notificationOccurred('success');
+              });
+          }, 2000);
+        }
+      });
+    } else {
+      tg.showPopup({
+        message: 'Приложение закроется. Бот пришлёт инструкцию.',
+        buttons:[{ id: 'cancel', type: 'cancel', text: 'Отмена' }, { id: 'ok', type: 'default', text: 'ОК' }]
+      }, async (btn: string) => {
+        if (btn !== 'ok') return;
+        setAdding(true);
+        await fetch(`${API}/bot/request-channel`, { method: 'POST', headers: { Authorization: `Bearer ${initData}` } })
+          .finally(() => setAdding(false));
+        tg.close();
+      });
+    }
   };
 
   const handleSync = async (id: number) => {
@@ -167,7 +188,7 @@ export default function ChannelsPage() {
       <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, padding: '12px 16px 28px',
         background: 'linear-gradient(to top, #0B0B0B 70%, transparent)' }}>
         <GradientButton onClick={handleAdd} disabled={adding}>
-          {adding ? 'Открываем бот...' : 'Добавить канал'}
+          {adding ? 'Открываем выбор...' : 'Добавить канал'}
         </GradientButton>
       </div>
     </div>

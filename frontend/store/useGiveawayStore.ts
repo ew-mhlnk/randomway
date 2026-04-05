@@ -1,7 +1,7 @@
 /* frontend/store/useGiveawayStore.ts */
 import { create } from 'zustand';
 
-export type ButtonColor = 'default' | 'green' | 'red' | 'purple';
+export type ButtonColor = 'default' | 'green' | 'red' | 'blue';
 
 interface GiveawayState {
   title: string;
@@ -10,26 +10,30 @@ interface GiveawayState {
   buttonCustomText: string;
   useCustomText: boolean;
   buttonEmoji: string;
-  buttonCustomEmojiId: string; // Document ID Telegram Premium custom emoji
+  buttonCustomEmojiId: string;
   buttonColor: ButtonColor;
 
   sponsorChannels: number[];
   publishChannels: number[];
-  resultChannels: number[];
+  resultChannels:  number[];
+  boostChannels:   number[];
 
   startImmediately: boolean;
   startDate: string | null;
-  endDate: string | null;
+  endDate:   string | null;
 
   winnersCount: number;
-  useBoosts: boolean;
+  useBoosts:  boolean;
   useInvites: boolean;
   maxInvites: number;
   useStories: boolean;
   useCaptcha: boolean;
 
   updateField: <K extends keyof GiveawayState>(field: K, value: GiveawayState[K]) => void;
-  toggleChannel: (type: 'sponsorChannels' | 'publishChannels' | 'resultChannels', id: number) => void;
+  toggleChannel: (
+    type: 'sponsorChannels' | 'publishChannels' | 'resultChannels' | 'boostChannels',
+    id: number
+  ) => void;
   reset: () => void;
   getButtonText: () => string;
 }
@@ -39,7 +43,7 @@ const initialState = {
   buttonText: 'Участвовать', buttonCustomText: '', useCustomText: false,
   buttonEmoji: '🎁', buttonCustomEmojiId: '',
   buttonColor: 'default' as ButtonColor,
-  sponsorChannels: [], publishChannels: [], resultChannels: [],
+  sponsorChannels: [], publishChannels: [], resultChannels: [], boostChannels: [],
   startImmediately: true, startDate: null, endDate: null,
   winnersCount: 1, useBoosts: false, useInvites: false, maxInvites: 10,
   useStories: false, useCaptcha: false,

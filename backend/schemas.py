@@ -13,16 +13,17 @@ class GiveawayPublishSchema(BaseModel):
     template_id: int
     button_text: str
     button_emoji: str
-    button_color: str = "default"                # ← НОВОЕ
-    button_custom_emoji_id: Optional[str] = None  # ← НОВОЕ
+    button_color: str = "default"
+    button_custom_emoji_id: Optional[str] = None
     sponsor_channels: List[int]
     publish_channels: List[int]
-    result_channels: List[int]
+    result_channels:  List[int]
+    boost_channels:   List[int] = []        # ← каналы для обязательного буста
     start_immediately: bool
     start_date: Optional[datetime] = None
-    end_date: Optional[datetime] = None
+    end_date:   Optional[datetime] = None
     winners_count: int
-    use_boosts: bool
+    use_boosts:  bool
     use_invites: bool
     max_invites: int
     use_stories: bool
@@ -30,7 +31,7 @@ class GiveawayPublishSchema(BaseModel):
 
 
 class JoinGiveawayRequest(BaseModel):
-    ref_code: Optional[str] = None
+    ref_code:      Optional[str] = None
     captcha_token: Optional[str] = None
 
 

@@ -11,7 +11,6 @@ import EmojiPickerSheet from '@/components/EmojiPickerSheet';
 
 export const API = 'https://api.randomway.pro/api/v1';
 
-/* ─── Метка над полем ────────────────────────────────────────────────── */
 function Label({ children }: { children: React.ReactNode }) {
   return (
     <p style={{ fontSize: 10, color: '#424141', marginBottom: 7, paddingLeft: 4 }}>
@@ -21,13 +20,11 @@ function Label({ children }: { children: React.ReactNode }) {
 }
 
 const fieldStyle: React.CSSProperties = {
-  width: '100%', height: 44, background: '#202020',
-  borderRadius: 15, border: '1px solid rgba(255,255,255,0.06)',
-  padding: '0 14px', fontSize: 14, color: '#fff', outline: 'none',
-  boxSizing: 'border-box', fontFamily: 'inherit',
+  width: '100%', height: 44, background: '#202020', borderRadius: 15,
+  border: '1px solid rgba(255,255,255,0.06)', padding: '0 14px',
+  color: '#fff', outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit',
 };
 
-/* ─── Пресет-чип текста ──────────────────────────────────────────────── */
 function Chip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button onClick={onClick} style={{
@@ -40,17 +37,16 @@ function Chip({ active, onClick, children }: { active: boolean; onClick: () => v
   );
 }
 
-/* ─── Цвета ──────────────────────────────────────────────────────────── */
-const COLORS: { value: ButtonColor; label: string; hex: string }[] = [
-  { value: 'default', label: 'По умолчанию', hex: '#0095FF' },
-  { value: 'green',   label: 'Зелёный',      hex: '#2DC653' },
-  { value: 'red',     label: 'Красный',      hex: '#FF4D4D' },
-  { value: 'purple',  label: 'Фиолетовый',   hex: '#9B59B6' },
+// Telegram Bot API 9.4: style 1=green, 2=red, 3=blue, no style=default (transparent)
+const COLORS: { value: ButtonColor; label: string; hex: string; preview: string }[] = [
+  { value: 'default', label: 'По умолчанию',   hex: 'rgba(255,255,255,0.15)', preview: 'rgba(255,255,255,0.6)' },
+  { value: 'green',   label: 'Зелёный',        hex: '#2DC653',               preview: '#fff' },
+  { value: 'red',     label: 'Красный',         hex: '#FF4D4D',               preview: '#fff' },
+  { value: 'blue',    label: 'Синий',           hex: '#0095FF',               preview: '#fff' },
 ];
 
 const PRESETS = ['Участвовать', 'Принять участие', 'Поехали!', 'Мне повезёт!'];
 
-/* ─── Страница ───────────────────────────────────────────────────────── */
 export default function Step1Page() {
   const router = useRouter();
   const { initData, haptic } = useTelegram();
@@ -89,8 +85,8 @@ export default function Step1Page() {
   };
 
   const handleNext = () => {
-    if (!store.title.trim())   { window.Telegram?.WebApp.showAlert('Введите название'); return; }
-    if (!store.templateId)     { window.Telegram?.WebApp.showAlert('Выберите пост'); return; }
+    if (!store.title.trim())  { window.Telegram?.WebApp.showAlert('Введите название'); return; }
+    if (!store.templateId)    { window.Telegram?.WebApp.showAlert('Выберите пост'); return; }
     haptic?.impactOccurred('medium');
     router.push('/create/step-2');
   };
@@ -104,12 +100,10 @@ export default function Step1Page() {
         {/* Название */}
         <div>
           <Label>Название розыгрыша</Label>
-          <input
-            style={{ ...fieldStyle, caretColor: '#0095FF' }}
+          <input style={{ ...fieldStyle, caretColor: '#0095FF' }}
             placeholder="Например, Розыгрыш iPhone 15"
             value={store.title}
-            onChange={e => store.updateField('title', e.target.value)}
-          />
+            onChange={e => store.updateField('title', e.target.value)} />
         </div>
 
         {/* Выберите пост */}
@@ -117,13 +111,12 @@ export default function Step1Page() {
           <Label>Выберите пост</Label>
           <button onClick={() => setPostOpen(true)} style={{
             ...fieldStyle, display: 'flex', alignItems: 'center',
-            justifyContent: 'space-between', cursor: 'pointer',
-          }}>
+            justifyContent: 'space-between', cursor: 'pointer' }}>
             <span style={{ color: selectedTpl ? '#fff' : '#424141', fontSize: 13,
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
               maxWidth: 'calc(100% - 24px)' }}>
               {selectedTpl
-                ? (selectedTpl.preview?.replace(/<[^>]+>/g,'')?.slice(0, 55) ?? '') +
+                ? (selectedTpl.preview?.replace(/<[^>]+>/g,'')?.slice(0,55) ?? '') +
                   ((selectedTpl.preview?.length ?? 0) > 55 ? '…' : '')
                 : 'Выберите пост'}
             </span>
@@ -155,51 +148,39 @@ export default function Step1Page() {
               maxLength={40}
               onChange={e => {
                 store.updateField('buttonCustomText', e.target.value);
-                if (e.target.value.trim()) store.updateField('useCustomText', true);
-                else store.updateField('useCustomText', false);
-              }}
-            />
+                store.updateField('useCustomText', !!e.target.value.trim());
+              }} />
             <button onClick={handleSaveCustom} disabled={!store.buttonCustomText.trim()} style={{
               height: 44, paddingInline: 14, borderRadius: 15,
               background: saved ? 'rgba(0,149,255,0.25)' : 'rgba(0,149,255,0.12)',
-              border: '1px solid rgba(0,149,255,0.28)',
-              color: '#0095FF', fontSize: 13, fontWeight: 600,
+              border: '1px solid rgba(0,149,255,0.28)', color: '#0095FF',
+              fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', transition: 'all 0.15s',
               cursor: store.buttonCustomText.trim() ? 'pointer' : 'not-allowed',
-              opacity: store.buttonCustomText.trim() ? 1 : 0.4, whiteSpace: 'nowrap',
-              transition: 'all 0.15s',
-            }}>
+              opacity: store.buttonCustomText.trim() ? 1 : 0.4 }}>
               {saved ? '✓ Ок' : 'Сохранить'}
             </button>
           </div>
         </div>
 
-        {/* Эмодзи + цвет кнопки — в одной строке */}
+        {/* Эмодзи + цвет */}
         <div style={{ display: 'flex', gap: 10 }}>
-
-          {/* Эмодзи */}
           <div style={{ flex: '0 0 auto' }}>
             <Label>Эмодзи</Label>
             <button onClick={() => setEmojiOpen(true)} style={{
               width: 64, height: 44, background: '#202020', borderRadius: 15,
-              border: store.buttonCustomEmojiId
-                ? '1px solid rgba(0,149,255,0.45)'
-                : '1px solid rgba(255,255,255,0.06)',
+              border: store.buttonCustomEmojiId ? '1px solid rgba(0,149,255,0.45)' : '1px solid rgba(255,255,255,0.06)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 22, cursor: 'pointer', transition: 'border 0.15s',
-            }}>
+              fontSize: 22, cursor: 'pointer' }}>
               {store.buttonCustomEmojiId ? '✨' : store.buttonEmoji}
             </button>
           </div>
-
-          {/* Цвет */}
           <div style={{ flex: 1 }}>
             <Label>Цвет кнопки</Label>
             <button onClick={() => setColorOpen(true)} style={{
-              ...fieldStyle, display: 'flex', alignItems: 'center',
-              gap: 10, cursor: 'pointer',
-            }}>
+              ...fieldStyle, display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
               <span style={{ width: 13, height: 13, borderRadius: '50%',
-                background: curColor.hex, flexShrink: 0 }} />
+                background: curColor.hex, flexShrink: 0,
+                border: curColor.value === 'default' ? '1px solid rgba(255,255,255,0.3)' : 'none' }} />
               <span style={{ flex: 1, fontSize: 13, color: 'rgba(255,255,255,0.72)', textAlign: 'left' }}>
                 {curColor.label}
               </span>
@@ -215,76 +196,60 @@ export default function Step1Page() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ fontSize: 10, color: '#424141' }}>Превью:</span>
             <div style={{
-              padding: '6px 16px', borderRadius: 20, fontSize: 13, fontWeight: 500,
-              background: curColor.hex + '22', border: `1px solid ${curColor.hex}44`,
-              color: curColor.hex, display: 'flex', alignItems: 'center', gap: 6,
-            }}>
+              padding: '7px 18px', borderRadius: 20, fontSize: 13, fontWeight: 500,
+              background: curColor.hex,
+              border: curColor.value === 'default' ? '1px solid rgba(255,255,255,0.25)' : 'none',
+              color: curColor.preview,
+              display: 'flex', alignItems: 'center', gap: 6 }}>
               <span>{store.buttonCustomEmojiId ? '✨' : store.buttonEmoji}</span>
               <span>{finalText}</span>
             </div>
           </div>
         )}
-
       </main>
 
       {/* Кнопка Далее */}
-      <div style={{
-        position: 'fixed', bottom: 0, left: 0, right: 0,
-        padding: '12px 16px 28px',
-        background: 'linear-gradient(to top, #0B0B0B 70%, transparent)',
-      }}>
+      <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, padding: '12px 16px 28px',
+        background: 'linear-gradient(to top, #0B0B0B 70%, transparent)' }}>
         <GradientButton onClick={handleNext}>Далее →</GradientButton>
       </div>
 
       {/* Sheet: Список постов */}
       <BottomSheet isOpen={postOpen} onClose={() => setPostOpen(false)} title="Список постов">
-        {loadingTpl ? (
-          <p style={{ textAlign: 'center', color: '#7D7D7D', padding: '24px 0', fontSize: 14 }}>Загрузка...</p>
-        ) : templates.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '32px 0' }}>
-            <p style={{ fontSize: 36, marginBottom: 12 }}>📝</p>
-            <p style={{ color: '#7D7D7D', fontSize: 14 }}>Нет постов. Создайте шаблон в разделе «Посты».</p>
-          </div>
-        ) : templates.map(t => {
-          const isSelected = store.templateId === t.id;
-          const preview = (t.preview ?? '').replace(/<[^>]+>/g, '');
-          const short = preview.slice(0, 88) + (preview.length > 88 ? '…' : '');
-          return (
-            <button key={t.id} onClick={() => {
-              haptic?.selectionChanged();
-              store.updateField('templateId', t.id);
-              setPostOpen(false);
-            }} style={{
-              display: 'flex', alignItems: 'center', gap: 14,
-              padding: '14px 4px', background: 'none', border: 'none',
-              borderBottom: '1px solid rgba(255,255,255,0.05)',
-              cursor: 'pointer', textAlign: 'left', width: '100%',
-            }}>
-              {/* Кружочек TG-стиль */}
-              <div style={{
-                width: 22, height: 22, borderRadius: '50%', flexShrink: 0,
-                border: isSelected ? '2px solid #0095FF' : '2px solid rgba(255,255,255,0.22)',
-                background: isSelected ? '#0095FF' : 'transparent',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                transition: 'all 0.14s',
-              }}>
-                {isSelected && (
-                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                    <path d="M2 6l3 3 5-5" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
-                )}
+        {loadingTpl
+          ? <p style={{ textAlign: 'center', color: '#7D7D7D', padding: '24px 0', fontSize: 14 }}>Загрузка...</p>
+          : templates.length === 0
+            ? <div style={{ textAlign: 'center', padding: '32px 0' }}>
+                <p style={{ fontSize: 36, marginBottom: 12 }}>📝</p>
+                <p style={{ color: '#7D7D7D', fontSize: 14 }}>Нет постов. Создайте шаблон в «Посты».</p>
               </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <p style={{ fontSize: 13, color: isSelected ? '#fff' : 'rgba(255,255,255,0.72)', lineHeight: 1.45 }}>
-                  {short || '(без текста)'}
-                </p>
-                <p style={{ fontSize: 10, color: '#7D7D7D', marginTop: 3 }}>
-                  Пост #{t.id} · {t.media_type ?? 'только текст'}
-                </p>
-              </div>
-            </button>
-          );
-        })}
+            : templates.map(t => {
+                const sel = store.templateId === t.id;
+                const preview = (t.preview ?? '').replace(/<[^>]+>/g,'');
+                return (
+                  <button key={t.id} onClick={() => { haptic?.selectionChanged(); store.updateField('templateId', t.id); setPostOpen(false); }}
+                    style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 4px',
+                      background: 'none', border: 'none', borderBottom: '1px solid rgba(255,255,255,0.05)',
+                      cursor: 'pointer', textAlign: 'left', width: '100%' }}>
+                    <div style={{ width: 22, height: 22, borderRadius: '50%', flexShrink: 0,
+                      border: sel ? '2px solid #0095FF' : '2px solid rgba(255,255,255,0.22)',
+                      background: sel ? '#0095FF' : 'transparent',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.14s' }}>
+                      {sel && <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                        <path d="M2 6l3 3 5-5" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ fontSize: 13, color: sel ? '#fff' : 'rgba(255,255,255,0.72)', lineHeight: 1.45 }}>
+                        {preview.slice(0,88) + (preview.length > 88 ? '…' : '') || '(без текста)'}
+                      </p>
+                      <p style={{ fontSize: 10, color: '#7D7D7D', marginTop: 3 }}>
+                        Пост #{t.id} · {t.media_type ?? 'только текст'}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
       </BottomSheet>
 
       {/* Sheet: Цвет кнопки */}
@@ -292,34 +257,25 @@ export default function Step1Page() {
         {COLORS.map(opt => {
           const isActive = store.buttonColor === opt.value;
           return (
-            <button key={opt.value} onClick={() => {
-              haptic?.selectionChanged();
-              store.updateField('buttonColor', opt.value);
-              setColorOpen(false);
-            }} style={{
-              display: 'flex', alignItems: 'center', gap: 14,
-              padding: '14px 4px', background: 'none', border: 'none',
-              borderBottom: '1px solid rgba(255,255,255,0.05)',
-              cursor: 'pointer', width: '100%',
-            }}>
-              <div style={{
-                width: 22, height: 22, borderRadius: '50%', background: opt.hex,
-                border: isActive ? '3px solid rgba(255,255,255,0.5)' : '3px solid transparent',
-                boxSizing: 'border-box', flexShrink: 0, transition: 'border 0.14s',
-              }} />
-              <span style={{ fontSize: 14, color: isActive ? '#fff' : 'rgba(255,255,255,0.68)', fontWeight: isActive ? 500 : 400 }}>
+            <button key={opt.value} onClick={() => { haptic?.selectionChanged(); store.updateField('buttonColor', opt.value); setColorOpen(false); }}
+              style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 4px',
+                background: 'none', border: 'none', borderBottom: '1px solid rgba(255,255,255,0.05)',
+                cursor: 'pointer', width: '100%' }}>
+              <div style={{ width: 22, height: 22, borderRadius: '50%', flexShrink: 0,
+                background: opt.hex,
+                border: opt.value === 'default' ? '2px solid rgba(255,255,255,0.3)' : (isActive ? '3px solid rgba(255,255,255,0.5)' : '3px solid transparent'),
+                boxSizing: 'border-box', transition: 'border 0.14s' }} />
+              <span style={{ fontSize: 14, color: isActive ? '#fff' : 'rgba(255,255,255,0.68)', fontWeight: isActive ? 500 : 400, flex: 1 }}>
                 {opt.label}
               </span>
-              {isActive && (
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ marginLeft: 'auto' }}>
-                  <path d="M3 8l4 4 6-7" stroke="#0095FF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
-              )}
+              {isActive && <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M3 8l4 4 6-7" stroke="#0095FF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>}
             </button>
           );
         })}
         <p style={{ fontSize: 10, color: '#424141', marginTop: 14, lineHeight: 1.5 }}>
-          Требует поддержки цветных кнопок в Telegram Bot API (февраль 2026+).
+          Цвет кнопки задаётся через поле <span style={{ fontFamily: 'monospace', color: 'rgba(255,255,255,0.3)' }}>style</span> (Telegram Bot API 9.4, февраль 2026).
         </p>
       </BottomSheet>
 
