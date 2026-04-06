@@ -38,7 +38,6 @@ class ParticipantService:
                     "title":       giveaway.title,
                     "use_boosts":  giveaway.use_boosts,
                     "use_invites": giveaway.use_invites,
-                    "use_stories": giveaway.use_stories,
                     "boost_url":   boost_url,
                     "max_invites": giveaway.max_invites,
                 },
@@ -47,7 +46,6 @@ class ParticipantService:
                     "invite_count":  existing.invite_count,
                     "has_boosted":   existing.has_boosted,
                     "boost_count":   getattr(existing, "boost_count", 0),
-                    "story_clicks":  existing.story_clicks,
                 },
             }
 
@@ -105,7 +103,6 @@ class ParticipantService:
                 "title":       giveaway.title,
                 "use_boosts":  giveaway.use_boosts,
                 "use_invites": giveaway.use_invites,
-                "use_stories": giveaway.use_stories,
                 "boost_url":   boost_url,
                 "max_invites": giveaway.max_invites,
             },
@@ -114,7 +111,6 @@ class ParticipantService:
                 "invite_count":  participant.invite_count,
                 "has_boosted":   participant.has_boosted,
                 "boost_count":   0,
-                "story_clicks":  participant.story_clicks,
             },
         }
 
