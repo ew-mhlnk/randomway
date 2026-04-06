@@ -3,6 +3,7 @@ import os
 import asyncio
 import logging
 import random
+import aiohttp
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from fastapi import HTTPException
@@ -37,16 +38,37 @@ def _make_join_button(text: str, url: str, color: str, custom_emoji_id: str | No
 
 async def _send_post(bot: Bot, chat_id: int, template: PostTemplate, keyboard: dict) -> int | None:
     params: dict = {"chat_id": chat_id, "reply_markup": keyboard, "parse_mode": "HTML"}
+    
     if template.media_type == "photo":
-        method = "sendPhoto";  params["photo"]     = template.media_id; params["caption"] = template.text
+        method = "sendPhoto"
+        params["photo"] = template.media_id
+        params["caption"] = template.text
     elif template.media_type == "video":
-        method = "sendVideo";  params["video"]     = template.media_id; params["caption"] = template.text
+        method = "sendVideo"
+        params["video"] = template.media_id
+        params["caption"] = template.text
     elif template.media_type == "animation":
-        method = "sendAnimation"; params["animation"] = template.media_id; params["caption"] = template.text
+        method = "sendAnimation"
+        params["animation"] = template.media_id
+        params["caption"] = template.text
     else:
-        method = "sendMessage"; params["text"] = template.text
-    result = await bot.session.make_request(bot.token, method, params)
-    return result.get("message_id") if isinstance(result, dict) else None
+        method = "sendMessage"
+        params["text"] = template.text
+
+    # Делаем сырой HTTP-запрос в обход строгих валидаторов aiogram
+    url = f"https://api.telegram.org/bot{bot.token}/{method}"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=params) as resp:
+                data = await resp.json()
+                if data.get("ok"):
+                    return data["result"].get("message_id")
+                else:
+                    logging.error(f"Telegram API Error: {data}")
+                    return None
+    except Exception as e:
+        logging.error(f"Request error: {e}")
+        return None
 
 
 async def _check_member_safe(bot: Bot, chat_id: int, user_id: int) -> bool:
@@ -132,10 +154,17 @@ class GiveawayService:
         ]]}
 
         rp = {"reply_to_message_id": post_msg_id} if post_msg_id else {}
-        await bot.session.make_request(bot.token, "sendMessage", {
-            "chat_id": user_id, "text": details + confirm_text,
-            "parse_mode": "HTML", "reply_markup": confirm_keyboard, **rp,
-        })
+        params = {
+            "chat_id": user_id, 
+            "text": details + confirm_text,
+            "parse_mode": "HTML", 
+            "reply_markup": confirm_keyboard, 
+            **rp
+        }
+        
+        url = f"https://api.telegram.org/bot{bot.token}/sendMessage"
+        async with aiohttp.ClientSession() as session:
+            await session.post(url, json=params)
 
     async def _post_to_channels_task(self, giveaway_id: int):
         bot = Bot(token=os.getenv("BOT_TOKEN"), default=DefaultBotProperties(parse_mode=ParseMode.HTML))
