@@ -70,9 +70,8 @@ export default function JoinPage() {
         setGw(data);
         if (['completed','finalizing','cancelled'].includes(data.status)) {
           setScreen('done');
-        } else if (data.use_captcha) {
-          setScreen('captcha');
         } else {
+          // 🚀 ИСПРАВЛЕНО: Всегда сначала делаем "тихий стук" на бэкенд без капчи!
           doJoin(null, data);
         }
       })
