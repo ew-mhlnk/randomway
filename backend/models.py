@@ -52,7 +52,6 @@ class Giveaway(Base):
     id:         Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     creator_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.telegram_id"))
 
-    # Основное
     title:              Mapped[str]        = mapped_column(String(255))
     template_id:        Mapped[int]        = mapped_column(ForeignKey("post_templates.id"))
     button_text:        Mapped[str]        = mapped_column(String(100), default="Участвовать")
@@ -60,32 +59,26 @@ class Giveaway(Base):
     button_color:       Mapped[str]        = mapped_column(String(20),  default="default", server_default="default")
     button_custom_emoji_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
-    # Каналы
+    # ── Маскот розыгрыша (id файла без расширения: 1-duck, 2-cat, ...)
+    mascot_id: Mapped[str] = mapped_column(String(20), default="1-duck", server_default="1-duck")
+
     sponsor_channel_ids: Mapped[list[int]] = mapped_column(PG_ARRAY(BigInteger), default=list)
     publish_channel_ids: Mapped[list[int]] = mapped_column(PG_ARRAY(BigInteger), default=list)
     result_channel_ids:  Mapped[list[int]] = mapped_column(PG_ARRAY(BigInteger), default=list)
-
-    # ── НОВОЕ: каналы для буста (обязательный буст для доп. билетов)
-    boost_channel_ids: Mapped[list[int]] = mapped_column(
+    boost_channel_ids:   Mapped[list[int]] = mapped_column(
         PG_ARRAY(BigInteger), default=list, server_default="{}")
 
-    # Даты
     start_immediately: Mapped[bool]            = mapped_column(Boolean, default=True)
     start_date:        Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     end_date:          Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    # Победители
-    winners_count: Mapped[int] = mapped_column(Integer, default=1)
+    winners_count: Mapped[int]  = mapped_column(Integer, default=1)
+    use_boosts:    Mapped[bool] = mapped_column(Boolean, default=False)
+    use_invites:   Mapped[bool] = mapped_column(Boolean, default=False)
+    max_invites:   Mapped[int]  = mapped_column(Integer, default=100)
+    # use_stories удалён
+    use_captcha:   Mapped[bool] = mapped_column(Boolean, default=False)
 
-    # Бонусы
-    use_boosts:  Mapped[bool] = mapped_column(Boolean, default=False)
-    use_invites: Mapped[bool] = mapped_column(Boolean, default=False)
-    max_invites: Mapped[int]  = mapped_column(Integer, default=100)
-    use_stories: Mapped[bool] = mapped_column(Boolean, default=False)
-    use_captcha: Mapped[bool] = mapped_column(Boolean, default=False)
-
-    # Системное
-    # Статусы: draft | pending_confirmation | active | pending | finalizing | completed | cancelled
     is_active: Mapped[bool] = mapped_column(Boolean, default=False)
     status:    Mapped[str]  = mapped_column(String(50), default="draft")
 
@@ -107,8 +100,8 @@ class Participant(Base):
     referred_by:   Mapped[str | None] = mapped_column(String(20), nullable=True)
     invite_count:  Mapped[int]        = mapped_column(Integer, default=0)
     has_boosted:   Mapped[bool]       = mapped_column(Boolean, default=False)
-    boost_count:   Mapped[int]        = mapped_column(Integer, default=0)   # кол-во бустов (макс 10)
-    story_clicks:  Mapped[int]        = mapped_column(Integer, default=0)
+    boost_count:   Mapped[int]        = mapped_column(Integer, default=0)
+    # story_clicks удалён
     is_winner:     Mapped[bool]       = mapped_column(Boolean, default=False)
     is_active:     Mapped[bool]       = mapped_column(Boolean, default=True)
     joined_at:     Mapped[datetime]   = mapped_column(

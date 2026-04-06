@@ -15,10 +15,11 @@ class GiveawayPublishSchema(BaseModel):
     button_emoji: str
     button_color: str = "default"
     button_custom_emoji_id: Optional[str] = None
+    mascot_id: str = "1-duck"           # ← маскот
     sponsor_channels: List[int]
     publish_channels: List[int]
     result_channels:  List[int]
-    boost_channels:   List[int] = []        # ← каналы для обязательного буста
+    boost_channels:   List[int] = []
     start_immediately: bool
     start_date: Optional[datetime] = None
     end_date:   Optional[datetime] = None
@@ -26,7 +27,7 @@ class GiveawayPublishSchema(BaseModel):
     use_boosts:  bool
     use_invites: bool
     max_invites: int
-    use_stories: bool
+    # use_stories удалён
     use_captcha: bool
 
 

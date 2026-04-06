@@ -3,6 +3,16 @@ import { create } from 'zustand';
 
 export type ButtonColor = 'default' | 'green' | 'red' | 'blue';
 
+export const MASCOTS = [
+  { id: '1-duck', label: 'Утка 1', file: '1-duck.webp' },
+  { id: '2-duck', label: 'Утка 2', file: '2-duck.webp' },
+  { id: '3-duck', label: 'Утка 3', file: '3-duck.webp' },
+  { id: '1-cat',  label: 'Кот 1',  file: '1-cat.webp'  },
+  { id: '2-cat',  label: 'Кот 2',  file: '2-cat.webp'  },
+] as const;
+
+export type MascotId = typeof MASCOTS[number]['id'];
+
 interface GiveawayState {
   title: string;
   templateId: number | null;
@@ -12,6 +22,7 @@ interface GiveawayState {
   buttonEmoji: string;
   buttonCustomEmojiId: string;
   buttonColor: ButtonColor;
+  mascotId: MascotId;
 
   sponsorChannels: number[];
   publishChannels: number[];
@@ -26,7 +37,6 @@ interface GiveawayState {
   useBoosts:  boolean;
   useInvites: boolean;
   maxInvites: number;
-  useStories: boolean;
   useCaptcha: boolean;
 
   updateField: <K extends keyof GiveawayState>(field: K, value: GiveawayState[K]) => void;
@@ -43,10 +53,11 @@ const initialState = {
   buttonText: 'Участвовать', buttonCustomText: '', useCustomText: false,
   buttonEmoji: '🎁', buttonCustomEmojiId: '',
   buttonColor: 'default' as ButtonColor,
+  mascotId: '1-duck' as MascotId,
   sponsorChannels: [], publishChannels: [], resultChannels: [], boostChannels: [],
   startImmediately: true, startDate: null, endDate: null,
   winnersCount: 1, useBoosts: false, useInvites: false, maxInvites: 10,
-  useStories: false, useCaptcha: false,
+  useCaptcha: false,
 };
 
 export const useGiveawayStore = create<GiveawayState>((set, get) => ({
