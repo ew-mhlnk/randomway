@@ -28,41 +28,47 @@ export default function JoinPage() {
   const [screen, setScreen]           = useState<Screen>('loading');
   const [giveaway, setGiveaway]       = useState<GiveawayInfo | null>(null);
   const [participant, setParticipant] = useState<ParticipantInfo | null>(null);
-  const [missing, setMissing]         = useState<any[]>([]);
+  const[missing, setMissing]         = useState<any[]>([]);
   const [refCode, setRefCode]         = useState<string | null>(null);
   const [boostOpen, setBoostOpen]     = useState(false);
-  const [checkingBoost, setCheckingBoost] = useState(false);
+  const[checkingBoost, setCheckingBoost] = useState(false);
 
   const turnstileRef = useRef<TurnstileInstance>(null);
   const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || '';
 
-  // Читаем ref из startParam
+  // Читаем рефку из startParam
   useEffect(() => {
     const sp = (window.Telegram?.WebApp?.initDataUnsafe as any)?.start_param || '';
     if (sp.includes('_ref_')) setRefCode(sp.split('_ref_')[1]);
-  }, []);
+  },[]);
 
-  // Загружаем публичную инфу
+  // 1. Загружаем инфу и делаем "ТИХИЙ СТУК" на бэкенд
   useEffect(() => {
-    if (!giveawayId) return;
+    if (!giveawayId || !initData) return;
+    
     fetch(`${API}/giveaways/${giveawayId}/public`)
       .then(r => { if (!r.ok) throw new Error(); return r.json(); })
       .then(data => {
         setGiveaway(data);
         if (['completed','finalizing','cancelled'].includes(data.status)) {
           setScreen('done');
-        } else if (data.use_captcha) {
-          setScreen('captcha');
         } else {
+          // 🚀 ИСПРАВЛЕНИЕ: Сразу пробуем зайти без капчи!
+          // Бэкенд сам разберется: пустить старичка или потребовать капчу у новичка.
           doJoin(null);
         }
       })
       .catch(() => setScreen('done'));
-  }, [giveawayId]);
+  }, [giveawayId, initData]);
 
+  // 2. Универсальная функция входа
   const doJoin = async (token: string | null) => {
     if (!initData || !giveawayId) return;
-    setScreen('checking');
+    
+    // Показываем "Проверяем", только если это ручное нажатие кнопки, 
+    // чтобы не моргать экранами при первичной загрузке
+    if (screen !== 'loading' && screen !== 'captcha') setScreen('checking');
+
     try {
       const res = await fetch(`${API}/giveaways/${giveawayId}/join`, {
         method: 'POST',
@@ -72,10 +78,12 @@ export default function JoinPage() {
       const data = await res.json();
 
       if (!res.ok) {
-        if (giveaway?.use_captcha && data.detail?.includes('Капча')) {
+        // 🚀 Если бэкенд требует капчу — значит юзер новый. Показываем защиту!
+        if (data.detail?.includes('Капча') || data.detail?.includes('проверку на робота')) {
           setScreen('captcha');
-          setTimeout(() => turnstileRef.current?.reset(), 400);
+          if (token) setTimeout(() => turnstileRef.current?.reset(), 400);
         } else {
+          // Иначе это реальная ошибка (например, розыгрыш удален)
           window.Telegram?.WebApp.showAlert(data.detail || 'Ошибка');
           setScreen('done');
         }
@@ -83,14 +91,14 @@ export default function JoinPage() {
       }
 
       if (data.status === 'missing_subscriptions') {
-        setMissing(data.channels); setScreen('missing');
+        setMissing(data.channels); 
+        setScreen('missing');
         haptic?.notificationOccurred('warning');
         return;
       }
 
-      // success or already_joined
+      // Успех или already_joined
       setParticipant(data.participant);
-      // Обновляем данные розыгрыша (с boost_url и т.д.)
       if (data.giveaway) setGiveaway(prev => ({ ...prev!, ...data.giveaway }));
       setScreen('joined');
       haptic?.notificationOccurred('success');
@@ -239,9 +247,7 @@ export default function JoinPage() {
     return (
       <main style={{ minHeight: '100vh', background: '#0B0B0B', display: 'flex', flexDirection: 'column' }}>
 
-        {/* Шапка успеха */}
         <div style={{ textAlign: 'center', padding: '48px 24px 24px', position: 'relative' }}>
-          {/* Светящийся круг */}
           <div style={{ position: 'absolute', top: 20, left: '50%', transform: 'translateX(-50%)',
             width: 160, height: 160, borderRadius: '50%',
             background: 'radial-gradient(circle, rgba(0,149,255,0.15) 0%, transparent 70%)',
@@ -253,7 +259,6 @@ export default function JoinPage() {
           <p style={{ fontSize: 13, color: '#7D7D7D', position: 'relative' }}>{giveaway.title}</p>
         </div>
 
-        {/* Кнопка «Увеличить шансы» */}
         {hasExtras && (
           <div style={{ padding: '0 16px 24px' }}>
             <button onClick={() => setBoostOpen(true)}
@@ -265,10 +270,8 @@ export default function JoinPage() {
           </div>
         )}
 
-        {/* ── Нижний лист «Увеличить шансы» ──────────────────────────── */}
         {boostOpen && (
           <>
-            {/* Backdrop */}
             <div onClick={() => setBoostOpen(false)}
               style={{ position: 'fixed', inset: 0, zIndex: 9998,
                 background: 'rgba(0,0,0,0.70)', backdropFilter: 'blur(8px)',
@@ -279,12 +282,10 @@ export default function JoinPage() {
               border: '1px solid rgba(255,255,255,0.09)', borderBottom: 'none',
               maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
 
-              {/* Ручка */}
               <div style={{ display: 'flex', justifyContent: 'center', padding: '10px 0 4px' }}>
                 <div style={{ width: 36, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.15)' }} />
               </div>
 
-              {/* Заголовок листа */}
               <div style={{ padding: '8px 20px 14px', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
                 <span style={{ fontSize: 16, fontWeight: 600, color: '#fff' }}>Увеличить шансы</span>
                 <button onClick={() => setBoostOpen(false)}
@@ -296,10 +297,8 @@ export default function JoinPage() {
 
               <div style={{ height: 1, background: 'rgba(255,255,255,0.07)' }} />
 
-              {/* Контент */}
               <div style={{ overflowY: 'auto', flex: 1, padding: '16px 16px 40px', display: 'flex', flexDirection: 'column', gap: 14 }}>
 
-                {/* Бусты */}
                 {giveaway.use_boosts && (
                   <div style={{ background: '#2E2F33', borderRadius: 22, padding: '16px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
@@ -309,7 +308,6 @@ export default function JoinPage() {
                         {participant.boost_count}/{boostMax} бустов
                       </span>
                     </div>
-                    {/* Прогресс */}
                     <div style={{ height: 4, background: 'rgba(255,255,255,0.08)', borderRadius: 2, marginBottom: 10, overflow: 'hidden' }}>
                       <div style={{ height: '100%', background: '#0095FF', borderRadius: 2,
                         width: `${(participant.boost_count / boostMax) * 100}%`, transition: 'width 0.3s' }} />
@@ -337,7 +335,6 @@ export default function JoinPage() {
                   </div>
                 )}
 
-                {/* Приглашения */}
                 {giveaway.use_invites && (
                   <div style={{ background: '#2E2F33', borderRadius: 22, padding: '16px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
@@ -355,7 +352,6 @@ export default function JoinPage() {
                     <p style={{ fontSize: 12, color: '#7D7D7D', lineHeight: 1.5, marginBottom: 14 }}>
                       Пригласите друзей и получите дополнительные билеты! Каждый приглашённый даёт +1 билет и +100% к шансу.
                     </p>
-                    {/* Реф-ссылка */}
                     <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: 12,
                       padding: '10px 14px', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
                       <span style={{ flex: 1, fontSize: 12, color: '#7D7D7D', fontFamily: 'monospace',
@@ -380,7 +376,6 @@ export default function JoinPage() {
                   </div>
                 )}
 
-                {/* Сторис */}
                 {giveaway.use_stories && (
                   <div style={{ background: '#2E2F33', borderRadius: 22, padding: '16px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
@@ -396,8 +391,7 @@ export default function JoinPage() {
                     <p style={{ fontSize: 12, color: '#7D7D7D', lineHeight: 1.5, marginBottom: 14 }}>
                       Выложите историю с реф-ссылкой и получите +1 билет за каждый переход по ней.
                     </p>
-                    <button onClick={shareStory}
-                      disabled={participant.story_clicks > 0}
+                    <button onClick={shareStory} disabled={participant.story_clicks > 0}
                       style={{ width: '100%', height: 42, borderRadius: 14,
                         background: participant.story_clicks > 0 ? 'rgba(255,255,255,0.04)' : 'rgba(0,149,255,0.15)',
                         border: `1px solid ${participant.story_clicks > 0 ? 'rgba(255,255,255,0.08)' : 'rgba(0,149,255,0.3)'}`,
