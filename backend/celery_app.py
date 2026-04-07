@@ -1,3 +1,4 @@
+"""backend/celery_app.py"""
 import os
 from celery import Celery
 from celery.schedules import crontab
@@ -22,10 +23,15 @@ celery.conf.update(
     enable_utc=True,
 )
 
-# 🚀 РАСПИСАНИЕ: Проверять время каждую 1 минуту
 celery.conf.beat_schedule = {
+    # Проверяем завершённые розыгрыши (время вышло)
     "check-expired-giveaways-every-minute": {
         "task": "tasks.scheduled_tasks.check_expired_giveaways",
         "schedule": crontab(minute="*"),
-    }
+    },
+    # НОВОЕ: Проверяем отложенные розыгрыши (время старта пришло)
+    "check-pending-giveaways-every-minute": {
+        "task": "tasks.scheduled_tasks.check_pending_giveaways",
+        "schedule": crontab(minute="*"),
+    },
 }
