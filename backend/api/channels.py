@@ -28,7 +28,7 @@ async def prepared_request_chat(request: Request, user_id: int = Depends(get_use
     """Регистрирует кнопку в Telegram API и отдает ID для Mini App (Bot API 9.6)"""
     bot = request.app.state.bot
     
-    # Telegram API 9.6 требует ВСЕ поля объекта ChatAdministratorRights, иначе выдает 400 Bad Request!
+    # Полный список прав (Telegram требует передавать все ключи)
     rights = {
         "is_anonymous": False,
         "can_manage_chat": True,
@@ -47,6 +47,7 @@ async def prepared_request_chat(request: Request, user_id: int = Depends(get_use
     url = f"https://api.telegram.org/bot{bot.token}/savePreparedKeyboardButton"
     params = {
         "user_id": user_id,
+        "text": "Выбрать канал",  # <--- ВОТ ЭТОГО НЕ ХВАТАЛО! Telegram требует это поле.
         "request_chat": {
             "request_id": 1, 
             "chat_is_channel": True, 
