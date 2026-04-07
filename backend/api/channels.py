@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import json  # <--- Добавлен импорт
 import aiohttp
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,7 +26,7 @@ async def get_channels(user_id: int = Depends(get_user_id), db: AsyncSession = D
 
 @router.post("/channels/prepared-request-chat")
 async def prepared_request_chat(request: Request, user_id: int = Depends(get_user_id)):
-    """Регистрирует кнопку в Telegram API и отдает ID для Mini App (Bot API 9.6)"""
+    """Регистрирует кнопку в Telegram API и отдает ID для Mini App"""
     bot = request.app.state.bot
     
     # Полный список прав (Telegram требует передавать все ключи)
@@ -44,10 +45,9 @@ async def prepared_request_chat(request: Request, user_id: int = Depends(get_use
         "can_manage_topics": False
     }
     
-    url = f"https://api.telegram.org/bot{bot.token}/savePreparedKeyboardButton"
-    params = {
-        "user_id": user_id,
-        "text": "Выбрать канал",  # Обязательное поле на верхнем уровне
+    # Формируем объект кнопки
+    button_payload = {
+        "text": "Выбрать канал",
         "request_chat": {
             "request_id": 1, 
             "chat_is_channel": True, 
@@ -56,13 +56,22 @@ async def prepared_request_chat(request: Request, user_id: int = Depends(get_use
             "bot_is_member": True
         }
     }
+
+    url = f"https://api.telegram.org/bot{bot.token}/savePreparedKeyboardButton"
     
+    # Важно: button передается как JSON-строка в form-data
+    params = {
+        "user_id": user_id,
+        "button": json.dumps(button_payload)
+    }
+
     async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=params) as resp:
-            data = await resp.json()
-            if data.get("ok"):
-                return {"status": "success", "prepared_id": data["result"]["id"]}
-            logging.error(f"TG API Error in prepared-request-chat: {data}")
+        # Используем data= для отправки как application/x-www-form-urlencoded
+        async with session.post(url, data=params) as resp:
+            result = await resp.json()
+            if result.get("ok"):
+                return {"status": "success", "prepared_id": result["result"]["id"]}
+            logging.error(f"TG API Error in prepared-request-chat: {result}")
             raise HTTPException(status_code=400, detail="Ошибка генерации кнопки в Telegram API")
 
 @router.post("/channels/{channel_id}/sync")
