@@ -1,6 +1,6 @@
 /*frontend/components/ChannelPickerStep.tsx
  * Переиспользуется на шагах 2 (спонсоры), 3 (публикация), 4 (итоги).
- * ФИКС: используем WebApp.requestChat (Bot API 9.6) вместо KeyboardButton
+ * ФИКС: используем WebApp.requestChat (Bot API 9.6) с prepared_id
  */
 'use client';
 
@@ -51,83 +51,47 @@ export default function ChannelPickerStep({
     loadChannels();
   }, [initData]);
 
-  const handleAddChannel = () => {
+  const handleAddChannel = async () => {
     const tg = window.Telegram?.WebApp;
     if (!tg || !initData) return;
     haptic?.impactOccurred('medium');
 
-    // Bot API 9.6: WebApp.requestChat — нативный выбор канала
     if (typeof (tg as any).requestChat === 'function') {
       setAddingChannel(true);
-      (tg as any).requestChat(
-        {
-          chat_is_channel: true,
-          user_administrator_rights: {
-            is_anonymous: false,
-            can_manage_chat: true,
-            can_post_messages: true,
-            can_edit_messages: true,
-            can_delete_messages: true,
-            can_manage_video_chats: false,
-            can_restrict_members: false,
-            can_promote_members: false,
-            can_change_info: false,
-            can_invite_users: false,
-          },
-          bot_administrator_rights: {
-            is_anonymous: false,
-            can_manage_chat: true,
-            can_post_messages: true,
-            can_edit_messages: true,
-            can_delete_messages: true,
-            can_manage_video_chats: false,
-            can_restrict_members: false,
-            can_promote_members: false,
-            can_change_info: false,
-            can_invite_users: false,
-          },
-          bot_is_member: true,
-        },
-        (chatId: number | null) => {
-          if (!chatId) {
-            setAddingChannel(false);
-            return;
-          }
-          fetch(`${API}/channels/add-by-id`, {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${initData}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ chat_id: chatId }),
-          })
-            .then(r => r.json())
-            .then(d => {
-              if (d.status === 'success') {
-                haptic?.notificationOccurred('success');
-                loadChannels();
-              } else {
-                window.Telegram?.WebApp.showAlert(d.detail || 'Ошибка при добавлении');
-              }
-            })
-            .catch(() => window.Telegram?.WebApp.showAlert('Ошибка сети'))
-            .finally(() => setAddingChannel(false));
+      try {
+        const res = await fetch(`${API}/channels/prepared-request-chat`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${initData}` }
+        });
+        const data = await res.json();
+        if (!res.ok || !data.prepared_id) {
+          tg.showAlert(data.detail || 'Ошибка генерации кнопки');
+          setAddingChannel(false);
+          return;
         }
-      );
+
+        (tg as any).requestChat(data.prepared_id, (success: boolean) => {
+          if (success) {
+            setTimeout(() => {
+              loadChannels();
+              haptic?.notificationOccurred('success');
+              setAddingChannel(false);
+            }, 2500);
+          } else {
+            setAddingChannel(false);
+          }
+        });
+      } catch (e) {
+        tg.showAlert('Ошибка сети');
+        setAddingChannel(false);
+      }
     } else {
-      // Фоллбэк для старых версий Telegram
       tg.showPopup({
-        message: 'Мини-апп закроется. Бот пришлёт инструкцию по добавлению канала.',
-        buttons: [
-          { id: 'cancel', type: 'cancel', text: 'Отмена' },
-          { id: 'ok', type: 'default', text: 'ОК' },
-        ],
+        message: 'Мини-апп закроется. Бот пришлёт инструкцию.',
+        buttons: [{ id: 'cancel', type: 'cancel', text: 'Отмена' }, { id: 'ok', type: 'default', text: 'ОК' }],
       }, async (btn: string) => {
         if (btn !== 'ok') return;
-        await fetch(`${API}/bot/request-channel`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${initData}` },
-        });
+        await fetch(`${API}/bot/request-channel`, { method: 'POST', headers: { Authorization: `Bearer ${initData}` } });
         tg.close();
       });
     }

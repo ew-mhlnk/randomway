@@ -1,58 +1,45 @@
-"""backend/tasks/scheduled_tasks.py"""
 import asyncio
 import logging
 from datetime import datetime, timezone
-
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy.pool import NullPool
+from sqlalchemy.future import select
 from celery_app import celery
-from database import AsyncSessionLocal
-from repositories.giveaway_repo import giveaway_repo
-
+from database import DATABASE_URL
+from models import Giveaway
 
 @celery.task(name="tasks.scheduled_tasks.check_expired_giveaways")
 def check_expired_giveaways():
-    """Раз в минуту проверяет, не пора ли закрыть розыгрыш"""
     asyncio.run(_check_expired_async())
-
 
 @celery.task(name="tasks.scheduled_tasks.check_pending_giveaways")
 def check_pending_giveaways():
-    """Раз в минуту проверяет, не пора ли запустить отложенный розыгрыш"""
     asyncio.run(_check_pending_async())
 
-
 async def _check_expired_async():
-    # ФИКС: убран engine.dispose()
+    engine = create_async_engine(DATABASE_URL, poolclass=NullPool)
+    SessionLocal = async_sessionmaker(bind=engine, expire_on_commit=False)
     try:
-        async with AsyncSessionLocal() as db:
-            expired = await giveaway_repo.get_expired_active_giveaways(db)
-            for giveaway in expired:
-                logging.info(f"⏰ Время вышло! Авто-завершение розыгрыша #{giveaway.id}")
-                giveaway.status = "finalizing"
+        async with SessionLocal() as db:
+            now = datetime.now(timezone.utc)
+            expired = (await db.execute(select(Giveaway).where(Giveaway.status == "active", Giveaway.end_date <= now))).scalars().all()
+            for gw in expired:
+                gw.status = "finalizing"
                 await db.commit()
-                celery.send_task("tasks.giveaway_tasks.task_finalize_giveaway", args=[giveaway.id])
-    except Exception as e:
-        logging.error(f"check_expired_giveaways error: {e}", exc_info=True)
-
+                celery.send_task("tasks.giveaway_tasks.task_finalize_giveaway", args=[gw.id])
+    finally:
+        await engine.dispose()
 
 async def _check_pending_async():
-    # НОВАЯ ЗАДАЧА: публикует розыгрыши с отложенным стартом когда пришло время
+    engine = create_async_engine(DATABASE_URL, poolclass=NullPool)
+    SessionLocal = async_sessionmaker(bind=engine, expire_on_commit=False)
     try:
-        async with AsyncSessionLocal() as db:
+        async with SessionLocal() as db:
             now = datetime.now(timezone.utc)
-            from sqlalchemy.future import select
-            from models import Giveaway
-            result = await db.execute(
-                select(Giveaway).where(
-                    Giveaway.status == "pending",
-                    Giveaway.start_date <= now,
-                )
-            )
-            pending = result.scalars().all()
-
-            for giveaway in pending:
-                logging.info(f"🚀 Запуск отложенного розыгрыша #{giveaway.id}")
-                giveaway.status = "active"
+            pending = (await db.execute(select(Giveaway).where(Giveaway.status == "pending", Giveaway.start_date <= now))).scalars().all()
+            for gw in pending:
+                gw.status = "active"
                 await db.commit()
-                celery.send_task("tasks.giveaway_tasks.task_publish_giveaway", args=[giveaway.id])
-    except Exception as e:
-        logging.error(f"check_pending_giveaways error: {e}", exc_info=True)
+                celery.send_task("tasks.giveaway_tasks.task_publish_giveaway", args=[gw.id])
+    finally:
+        await engine.dispose()
