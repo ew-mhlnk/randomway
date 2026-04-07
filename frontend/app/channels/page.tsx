@@ -28,12 +28,8 @@ function Avatar({ ch }: { ch: Channel }) {
   const bg = grads[Math.abs(ch.id) % grads.length];
   if (ch.has_photo && ch.photo_url && !err) {
     return (
-      <img
-        src={ch.photo_url}
-        alt={ch.title}
-        onError={() => setErr(true)}
-        style={{ width: 48, height: 48, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }}
-      />
+      <img src={ch.photo_url} alt={ch.title} onError={() => setErr(true)}
+        style={{ width: 48, height: 48, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />
     );
   }
   return (
@@ -65,19 +61,13 @@ function IcoTrash() {
   );
 }
 
-function ChannelCard({ ch, onSync, onDelete, busy }: {
-  ch: Channel; onSync: () => void; onDelete: () => void; busy: boolean;
-}) {
+function ChannelCard({ ch, onSync, onDelete, busy }: { ch: Channel; onSync: () => void; onDelete: () => void; busy: boolean; }) {
   return (
     <div style={{ background: '#2E2F33', borderRadius: 22, padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
       <Avatar ch={ch} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <p style={{ fontSize: 15, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {ch.title}
-        </p>
-        <p style={{ fontSize: 11, color: '#7D7D7D', marginTop: 3 }}>
-          Подписчиков: <span style={{ color: 'rgba(255,255,255,0.5)' }}>{ch.members_formatted}</span>
-        </p>
+        <p style={{ fontSize: 15, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ch.title}</p>
+        <p style={{ fontSize: 11, color: '#7D7D7D', marginTop: 3 }}>Подписчиков: <span style={{ color: 'rgba(255,255,255,0.5)' }}>{ch.members_formatted}</span></p>
       </div>
       <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
         <button onClick={onSync} disabled={busy} aria-label="Обновить"
@@ -104,79 +94,64 @@ export default function ChannelsPage() {
 
   const load = () => {
     fetch(`${API}/channels`, { headers: { Authorization: `Bearer ${initData}` } })
-      .then(r => r.json())
-      .then(d => setChannels(d.channels ?? []))
-      .catch(console.error)
-      .finally(() => setLoading(false));
+      .then(r => r.json()).then(d => setChannels(d.channels ?? [])).finally(() => setLoading(false));
   };
 
-  useEffect(() => {
-    if (initData) load();
-  }, [initData]);
+  useEffect(() => { if (initData) load(); }, [initData]);
+
+  // Надежный запасной вариант, если API телеграма выдаст Bad Request
+  const fallbackAdd = () => {
+    const tg = window.Telegram?.WebApp;
+    tg?.showPopup({
+      message: 'Приложение закроется. Бот пришлёт инструкцию по добавлению канала.',
+      buttons: [{ id: 'cancel', type: 'cancel', text: 'Отмена' }, { id: 'ok', type: 'default', text: 'ОК' }],
+    }, async (btn: string) => {
+      if (btn !== 'ok') { setAdding(false); return; }
+      await fetch(`${API}/bot/request-channel`, { method: 'POST', headers: { Authorization: `Bearer ${initData}` } });
+      tg.close();
+    });
+  };
 
   const handleAdd = async () => {
     const tg = window.Telegram?.WebApp;
     if (!tg || !initData) return;
     haptic?.impactOccurred('medium');
+    setAdding(true);
 
     if (typeof (tg as any).requestChat === 'function') {
-      setAdding(true);
       try {
-        // 1. Просим у бэкенда ID кнопки (требование Bot API 9.6)
         const res = await fetch(`${API}/channels/prepared-request-chat`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${initData}` }
         });
         const data = await res.json();
+        
+        // Бесшовный переход на запасной метод, если Telegram отклонил запрос (400 Bad Request)
         if (!res.ok || !data.prepared_id) {
-          tg.showAlert(data.detail || 'Ошибка генерации кнопки Telegram');
-          setAdding(false);
+          fallbackAdd();
           return;
         }
 
-        // 2. Открываем нативный выбор канала с полученным ID
         (tg as any).requestChat(data.prepared_id, (success: boolean) => {
           if (success) {
-            // Webhook обрабатывает канал в фоне. Ждем 2.5 сек и обновляем.
-            setTimeout(() => {
-              load();
-              haptic?.notificationOccurred('success');
-              setAdding(false);
-            }, 2500);
+            setTimeout(() => { load(); haptic?.notificationOccurred('success'); setAdding(false); }, 2500);
           } else {
             setAdding(false);
           }
         });
       } catch (e) {
-        tg.showAlert('Ошибка сети');
-        setAdding(false);
+        fallbackAdd();
       }
     } else {
-      // Фоллбэк для старых версий Telegram
-      tg.showPopup({
-        message: 'Приложение закроется. Бот пришлёт инструкцию.',
-        buttons: [{ id: 'cancel', type: 'cancel', text: 'Отмена' }, { id: 'ok', type: 'default', text: 'ОК' }],
-      }, async (btn: string) => {
-        if (btn !== 'ok') return;
-        await fetch(`${API}/bot/request-channel`, { method: 'POST', headers: { Authorization: `Bearer ${initData}` } });
-        tg.close();
-      });
+      fallbackAdd();
     }
   };
 
   const handleSync = async (id: number) => {
-    haptic?.impactOccurred('light');
-    setActionId(id);
-    const res = await fetch(`${API}/channels/${id}/sync`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${initData}` },
-    });
-    if (res.ok) {
-      haptic?.notificationOccurred('success');
-      load();
-    } else {
-      window.Telegram?.WebApp.showAlert('Ошибка: бот больше не администратор');
-    }
+    haptic?.impactOccurred('light'); setActionId(id);
+    const res = await fetch(`${API}/channels/${id}/sync`, { method: 'POST', headers: { Authorization: `Bearer ${initData}` } });
+    if (res.ok) { haptic?.notificationOccurred('success'); load(); }
+    else { window.Telegram?.WebApp.showAlert('Ошибка: бот больше не администратор'); }
     setActionId(null);
   };
 
@@ -184,18 +159,11 @@ export default function ChannelsPage() {
     const tg = window.Telegram?.WebApp;
     tg?.showPopup({
       message: 'Удалить канал? Бот выйдет из него.',
-      buttons: [
-        { id: 'cancel', type: 'cancel', text: 'Отмена' },
-        { id: 'del', type: 'destructive', text: 'Удалить' },
-      ],
+      buttons: [{ id: 'cancel', type: 'cancel', text: 'Отмена' }, { id: 'del', type: 'destructive', text: 'Удалить' }],
     }, async (btn: string) => {
       if (btn !== 'del') return;
-      haptic?.impactOccurred('heavy');
-      setActionId(id);
-      await fetch(`${API}/channels/${id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${initData}` },
-      });
+      haptic?.impactOccurred('heavy'); setActionId(id);
+      await fetch(`${API}/channels/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${initData}` } });
       setChannels(p => p.filter(c => c.id !== id));
       setActionId(null);
     });
@@ -205,36 +173,17 @@ export default function ChannelsPage() {
     <div style={{ minHeight: '100vh', background: '#0B0B0B', display: 'flex', flexDirection: 'column' }}>
       <PageHeader title="Каналы" />
       <main style={{ flex: 1, padding: '16px 16px 120px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {loading
-          ? <p style={{ textAlign: 'center', marginTop: 60, color: '#7D7D7D', fontSize: 14 }}>Загрузка...</p>
+        {loading ? <p style={{ textAlign: 'center', marginTop: 60, color: '#7D7D7D', fontSize: 14 }}>Загрузка...</p>
           : channels.length === 0
-            ? (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: 80, gap: 12 }}>
+            ? <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: 80, gap: 12 }}>
                 <span style={{ fontSize: 48 }}>📭</span>
                 <p style={{ color: '#7D7D7D', fontSize: 14 }}>Каналов пока нет</p>
-                <p style={{ color: '#424141', fontSize: 12, textAlign: 'center', padding: '0 32px' }}>
-                  Нажмите «Добавить канал» и выберите канал, в котором бот является администратором
-                </p>
               </div>
-            )
-            : channels.map(ch => (
-              <ChannelCard
-                key={ch.id}
-                ch={ch}
-                busy={actionId === ch.id}
-                onSync={() => handleSync(ch.id)}
-                onDelete={() => handleDelete(ch.id)}
-              />
-            ))}
+            : channels.map(ch => <ChannelCard key={ch.id} ch={ch} busy={actionId === ch.id} onSync={() => handleSync(ch.id)} onDelete={() => handleDelete(ch.id)} />)
+        }
       </main>
-      <div style={{
-        position: 'fixed', bottom: 0, left: 0, right: 0,
-        padding: '12px 16px 28px',
-        background: 'linear-gradient(to top, #0B0B0B 70%, transparent)',
-      }}>
-        <GradientButton onClick={handleAdd} disabled={adding}>
-          {adding ? 'Выбор канала...' : 'Добавить канал'}
-        </GradientButton>
+      <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, padding: '12px 16px 28px', background: 'linear-gradient(to top, #0B0B0B 70%, transparent)' }}>
+        <GradientButton onClick={handleAdd} disabled={adding}>{adding ? 'Загрузка...' : 'Добавить канал'}</GradientButton>
       </div>
     </div>
   );
