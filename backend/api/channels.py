@@ -27,12 +27,33 @@ async def get_channels(user_id: int = Depends(get_user_id), db: AsyncSession = D
 async def prepared_request_chat(request: Request, user_id: int = Depends(get_user_id)):
     """Регистрирует кнопку в Telegram API и отдает ID для Mini App (Bot API 9.6)"""
     bot = request.app.state.bot
-    rights = {"is_anonymous": False, "can_manage_chat": True, "can_post_messages": True, "can_edit_messages": True, "can_delete_messages": True}
+    
+    # Telegram API 9.6 требует ВСЕ поля объекта ChatAdministratorRights, иначе выдает 400 Bad Request!
+    rights = {
+        "is_anonymous": False,
+        "can_manage_chat": True,
+        "can_delete_messages": True,
+        "can_manage_video_chats": False,
+        "can_restrict_members": False,
+        "can_promote_members": False,
+        "can_change_info": False,
+        "can_invite_users": False,
+        "can_post_messages": True,
+        "can_edit_messages": True,
+        "can_pin_messages": False,
+        "can_manage_topics": False
+    }
     
     url = f"https://api.telegram.org/bot{bot.token}/savePreparedKeyboardButton"
     params = {
         "user_id": user_id,
-        "request_chat": {"request_id": 1, "chat_is_channel": True, "user_administrator_rights": rights, "bot_administrator_rights": rights, "bot_is_member": True}
+        "request_chat": {
+            "request_id": 1, 
+            "chat_is_channel": True, 
+            "user_administrator_rights": rights, 
+            "bot_administrator_rights": rights, 
+            "bot_is_member": True
+        }
     }
     
     async with aiohttp.ClientSession() as session:
@@ -40,7 +61,8 @@ async def prepared_request_chat(request: Request, user_id: int = Depends(get_use
             data = await resp.json()
             if data.get("ok"):
                 return {"status": "success", "prepared_id": data["result"]["id"]}
-            raise HTTPException(status_code=400, detail=data.get("description", "Ошибка Telegram API"))
+            logging.error(f"TG API Error in prepared-request-chat: {data}")
+            raise HTTPException(status_code=400, detail="Ошибка генерации кнопки в Telegram API")
 
 @router.post("/channels/{channel_id}/sync")
 async def sync_channel(channel_id: int, request: Request, user_id: int = Depends(get_user_id), db: AsyncSession = Depends(get_db)):
