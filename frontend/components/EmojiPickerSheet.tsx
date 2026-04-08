@@ -81,9 +81,15 @@ export default function EmojiPickerSheet({
         </p>
         <p style={{ fontSize: 10, color: '#424141', marginBottom: 10, lineHeight: 1.5 }}>
           Вставьте Document ID кастомного эмодзи. Получить ID можно через{' '}
-          <span style={{ color: 'rgba(255,255,255,0.35)' }}>@getidsbot</span> или из{' '}
-          <span style={{ color: 'rgba(255,255,255,0.35)' }}>Sticker ID в Telegram</span>.
-          Требует Telegram Premium у подписчиков.
+          <a
+            href="https://t.me/emojiid_get_bot"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: '#0095FF', textDecoration: 'none' }}
+          >
+            @emojiid_get_bot
+          </a>
+          . Требует Telegram Premium.
         </p>
         <div style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
           <input

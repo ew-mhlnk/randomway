@@ -31,9 +31,9 @@ export default function Step11Page() {
         title:          store.title,
         template_id:    store.templateId,
         button_text:    store.getButtonText(),
-        button_emoji:   store.buttonCustomEmojiId ? '⭐' : store.buttonEmoji,
+        button_emoji:   store.buttonEmoji,           // Исправлено: всегда передаем обычный эмодзи
         button_color:   store.buttonColor,
-        button_custom_emoji_id: store.buttonCustomEmojiId || null,
+        button_custom_emoji_id: store.buttonCustomEmojiId || null,  // Отдельно ID кастомного
         mascot_id:      store.mascotId,
         sponsor_channels:  store.sponsorChannels,
         publish_channels:  store.publishChannels,
