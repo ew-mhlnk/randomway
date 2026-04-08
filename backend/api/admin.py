@@ -49,11 +49,10 @@ async def get_global_stats(is_admin: bool = Depends(verify_admin_token), db: Asy
 
 @router.get("/giveaways/{giveaway_id}")
 async def get_giveaway_details(giveaway_id: int, is_admin: bool = Depends(verify_admin_token), db: AsyncSession = Depends(get_db)):
-    """Детальная информация о розыгрыше и всех его участниках"""
     giveaway = await db.scalar(select(Giveaway).where(Giveaway.id == giveaway_id))
     if not giveaway:
         raise HTTPException(status_code=404, detail="Розыгрыш не найден")
-        
+
     stmt = (
         select(Participant, User)
         .join(User, Participant.user_id == User.telegram_id)
@@ -61,7 +60,7 @@ async def get_giveaway_details(giveaway_id: int, is_admin: bool = Depends(verify
     )
     res = await db.execute(stmt)
     participants = res.all()
-    
+
     parts_data =[]
     for p, u in participants:
         parts_data.append({
@@ -70,11 +69,11 @@ async def get_giveaway_details(giveaway_id: int, is_admin: bool = Depends(verify
             "username": u.username,
             "invite_count": p.invite_count,
             "has_boosted": p.has_boosted,
-            "story_clicks": p.story_clicks,
+            "boost_count": getattr(p, 'boost_count', 0),  # Вместо story_clicks выводим количество бустов
             "is_active": p.is_active,
             "is_winner": p.is_winner
         })
-        
+
     return {
         "info": {
             "id": giveaway.id,
@@ -83,8 +82,8 @@ async def get_giveaway_details(giveaway_id: int, is_admin: bool = Depends(verify
             "winners_count": giveaway.winners_count,
             "use_boosts": giveaway.use_boosts,
             "use_invites": giveaway.use_invites,
-            "use_stories": giveaway.use_stories,
             "use_captcha": giveaway.use_captcha
+            # use_stories удален
         },
         "participants": parts_data
     }
