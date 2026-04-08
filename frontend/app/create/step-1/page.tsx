@@ -170,8 +170,10 @@ export default function Step1Page() {
               width: 64, height: 44, background: '#202020', borderRadius: 15,
               border: store.buttonCustomEmojiId ? '1px solid rgba(0,149,255,0.45)' : '1px solid rgba(255,255,255,0.06)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 22, cursor: 'pointer' }}>
-              {store.buttonCustomEmojiId ? '✨' : store.buttonEmoji}
+              fontSize: store.buttonEmoji ? 22 : 16, cursor: 'pointer',
+              color: store.buttonEmoji ? 'inherit' : 'rgba(255,255,255,0.3)',
+            }}>
+              {store.buttonCustomEmojiId ? '✨' : (store.buttonEmoji || '+')}
             </button>
           </div>
           <div style={{ flex: 1 }}>
@@ -201,7 +203,10 @@ export default function Step1Page() {
               border: curColor.value === 'default' ? '1px solid rgba(255,255,255,0.25)' : 'none',
               color: curColor.preview,
               display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span>{store.buttonCustomEmojiId ? '✨' : store.buttonEmoji}</span>
+              {/* Эмодзи только если задано */}
+              {(store.buttonCustomEmojiId || store.buttonEmoji) && (
+                <span>{store.buttonCustomEmojiId ? '✨' : store.buttonEmoji}</span>
+              )}
               <span>{finalText}</span>
             </div>
           </div>

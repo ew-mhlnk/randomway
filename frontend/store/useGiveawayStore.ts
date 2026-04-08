@@ -51,7 +51,8 @@ interface GiveawayState {
 const initialState = {
   title: '', templateId: null,
   buttonText: 'Участвовать', buttonCustomText: '', useCustomText: false,
-  buttonEmoji: '🎁', buttonCustomEmojiId: '',
+  buttonEmoji: '', // Было '🎁', теперь пусто
+  buttonCustomEmojiId: '',
   buttonColor: 'default' as ButtonColor,
   mascotId: '1-duck' as MascotId,
   sponsorChannels: [], publishChannels: [], resultChannels: [], boostChannels: [],

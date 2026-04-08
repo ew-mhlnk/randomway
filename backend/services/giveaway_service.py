@@ -1,4 +1,3 @@
-"""backend/services/giveaway_service.py"""
 import os
 import asyncio
 import logging
@@ -223,7 +222,6 @@ class GiveawayService:
                 if giveaway.result_channel_ids:
                     wd = await participant_repo.get_winners_with_users(db, giveaway_id)
                     bot_info = await bot.get_me()
-                    app_name = os.getenv('MINI_APP_SHORT_NAME', 'app')
                     
                     # Формируем нумерованный список с гиперссылками
                     winners_lines = []
@@ -236,9 +234,9 @@ class GiveawayService:
                     
                     winners_text = "\n".join(winners_lines)
                     
-                    # Ссылка для проверки — на мини-апп
-                    check_url = f"https://t.me/{bot_info.username}/{app_name}?startapp=gw_{giveaway_id}"
-                    
+                    # Ссылка ведёт на /start с параметром checklot{id}
+                    check_url = f"https://t.me/{bot_info.username}?start=checklot{giveaway_id}"
+
                     text = (
                         f'🎉 Результаты розыгрыша "<b>{giveaway.title}</b>":\n\n'
                         f'🏆 Победители:\n{winners_text}\n\n'
