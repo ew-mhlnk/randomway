@@ -76,11 +76,14 @@ class Giveaway(Base):
     use_boosts:    Mapped[bool] = mapped_column(Boolean, default=False)
     use_invites:   Mapped[bool] = mapped_column(Boolean, default=False)
     max_invites:   Mapped[int]  = mapped_column(Integer, default=100)
-    # use_stories удалён
     use_captcha:   Mapped[bool] = mapped_column(Boolean, default=False)
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=False)
     status:    Mapped[str]  = mapped_column(String(50), default="draft")
+
+    # Для хранения информации о первом опубликованном посте (чтобы ответить на ним с результатами)
+    post_message_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    post_channel_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     creator  = relationship("User",         back_populates="giveaways")
     template = relationship("PostTemplate", back_populates="giveaways")
@@ -101,7 +104,6 @@ class Participant(Base):
     invite_count:  Mapped[int]        = mapped_column(Integer, default=0)
     has_boosted:   Mapped[bool]       = mapped_column(Boolean, default=False)
     boost_count:   Mapped[int]        = mapped_column(Integer, default=0)
-    # story_clicks удалён
     is_winner:     Mapped[bool]       = mapped_column(Boolean, default=False)
     is_active:     Mapped[bool]       = mapped_column(Boolean, default=True)
     joined_at:     Mapped[datetime]   = mapped_column(

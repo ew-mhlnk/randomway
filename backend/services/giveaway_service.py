@@ -24,14 +24,19 @@ from celery_app import celery
 celery_engine = create_async_engine(DATABASE_URL, poolclass=NullPool, echo=False)
 CelerySessionLocal = async_sessionmaker(bind=celery_engine, expire_on_commit=False)
 
-BUTTON_STYLE_MAP: dict[str, int | None] = {
-    "default": None, "green": 1, "red": 2, "blue": 3,
+BUTTON_STYLE_MAP: dict[str, str | None] = {
+    "default": None,
+    "green": "success",
+    "red": "danger", 
+    "blue": "primary",
 }
 _TG_SEMAPHORE = asyncio.Semaphore(20)
 
 def _make_join_button(text: str, url: str, color: str, custom_emoji_id: str | None) -> dict:
     btn: dict = {"text": text, "url": url}
-    # Убрали передачу style при предпросмотре, чтобы избежать Bad Request
+    style = BUTTON_STYLE_MAP.get(color)
+    if style:
+        btn["style"] = style
     if custom_emoji_id:
         btn["icon_custom_emoji_id"] = custom_emoji_id
     return btn
@@ -119,7 +124,6 @@ class GiveawayService:
             f"📌 <b>Спонсоры:</b>\n{sponsor_lines}\n📢 <b>Публикация:</b>\n{publish_lines}\n📊 <b>Итоги:</b>\n{result_lines}"
         )
         
-        # Кнопки подтверждения (без style, чтобы не было ошибки)
         confirm_keyboard = {"inline_keyboard": [
             [{"text": "✅ Принять", "callback_data": f"confirm_gw_{giveaway.id}"},
              {"text": "❌ Отмена", "callback_data": f"cancel_gw_{giveaway.id}"}]
@@ -142,11 +146,17 @@ class GiveawayService:
                 url = f"https://t.me/{bot_info.username}/{os.getenv('MINI_APP_SHORT_NAME', 'app')}?startapp=gw_{giveaway.id}"
                 btn = _make_join_button(
                     text=f"{giveaway.button_color_emoji}{giveaway.button_text}",
-                    url=url, color=giveaway.button_color, custom_emoji_id=giveaway.button_custom_emoji_id,
+                    url=url, color=giveaway.button_color,
+                    custom_emoji_id=giveaway.button_custom_emoji_id,
                 )
                 for ch in channels:
                     try:
-                        await _send_post(bot, ch.telegram_id, template, {"inline_keyboard": [[btn]]})
+                        msg_id = await _send_post(bot, ch.telegram_id, template, {"inline_keyboard": [[btn]]})
+                        # Сохраняем ID первого опубликованного поста
+                        if msg_id and not giveaway.post_message_id:
+                            giveaway.post_message_id = msg_id
+                            giveaway.post_channel_id = ch.telegram_id
+                            await db.commit()
                         await asyncio.sleep(0.5)
                     except Exception as e:
                         logging.error(f"Publish error {ch.title}: {e}")
@@ -212,10 +222,47 @@ class GiveawayService:
 
                 if giveaway.result_channel_ids:
                     wd = await participant_repo.get_winners_with_users(db, giveaway_id)
-                    wt = "\n".join([f"🏆 {u.first_name}" for _, u in wd])
-                    text = f"🎉 <b>Итоги розыгрыша «{giveaway.title}»!</b>\n\n{wt}"
-                    for ch in await channel_repo.get_by_ids(db, giveaway.result_channel_ids):
-                        await bot.send_message(chat_id=ch.telegram_id, text=text)
+                    bot_info = await bot.get_me()
+                    app_name = os.getenv('MINI_APP_SHORT_NAME', 'app')
+                    
+                    # Формируем нумерованный список с гиперссылками
+                    winners_lines = []
+                    for i, (p, u) in enumerate(wd, 1):
+                        if u.username:
+                            name_link = f'<a href="https://t.me/{u.username}">{u.first_name}</a>'
+                        else:
+                            name_link = f'<a href="tg://user?id={u.telegram_id}">{u.first_name}</a>'
+                        winners_lines.append(f"{i}. {name_link}")
+                    
+                    winners_text = "\n".join(winners_lines)
+                    
+                    # Ссылка для проверки — на мини-апп
+                    check_url = f"https://t.me/{bot_info.username}/{app_name}?startapp=gw_{giveaway_id}"
+                    
+                    text = (
+                        f'🎉 Результаты розыгрыша "<b>{giveaway.title}</b>":\n\n'
+                        f'🏆 Победители:\n{winners_text}\n\n'
+                        f'<a href="{check_url}">✔️ Проверить результаты</a>'
+                    )
+                    
+                    result_channels = await channel_repo.get_by_ids(db, giveaway.result_channel_ids)
+                    for ch in result_channels:
+                        params: dict = {
+                            "chat_id": ch.telegram_id,
+                            "text": text,
+                            "parse_mode": "HTML",
+                            "disable_web_page_preview": True,
+                        }
+                        # Если результаты публикуются в тот же канал что и розыгрыш — отвечаем на пост
+                        if (giveaway.post_channel_id == ch.telegram_id 
+                                and giveaway.post_message_id):
+                            params["reply_to_message_id"] = giveaway.post_message_id
+                        
+                        async with aiohttp.ClientSession() as session:
+                            await session.post(
+                                f"https://api.telegram.org/bot{bot.token}/sendMessage",
+                                json=params
+                            )
 
     async def publish_giveaway(self, db: AsyncSession, bot: Bot, user_id: int, data: dict, bg_tasks) -> int:
         giveaway = await giveaway_repo.create(db, obj_in_data={
@@ -258,7 +305,6 @@ class GiveawayService:
         celery.send_task("tasks.giveaway_tasks.task_finalize_giveaway", args=[giveaway_id])
         return {"status": "processing"}
 
-    # ЭТА ФУНКЦИЯ ПРОПАДАЛА В ПРОШЛЫЙ РАЗ!
     async def get_creator_giveaways(self, db: AsyncSession, user_id: int) -> list[dict]:
         giveaways = await giveaway_repo.get_all_by_creator(db, user_id)
         result = []
