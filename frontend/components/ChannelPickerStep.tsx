@@ -63,7 +63,7 @@ export default function ChannelPickerStep({ title, subtitle, emptyHint, selected
 
         (tg as any).requestChat(data.prepared_id, (success: boolean) => {
           if (success) {
-            setTimeout(() => { loadChannels(); haptic?.notificationOccurred('success'); setAddingChannel(false); }, 2500);
+            setTimeout(() => { loadChannels(); haptic?.notificationOccurred('success'); setAddingChannel(false); }, 4000);
           } else {
             setAddingChannel(false);
           }

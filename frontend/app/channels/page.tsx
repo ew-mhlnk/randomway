@@ -134,7 +134,7 @@ export default function ChannelsPage() {
 
         (tg as any).requestChat(data.prepared_id, (success: boolean) => {
           if (success) {
-            setTimeout(() => { load(); haptic?.notificationOccurred('success'); setAdding(false); }, 2500);
+            setTimeout(() => { load(); haptic?.notificationOccurred('success'); setAdding(false); }, 4000);
           } else {
             setAdding(false);
           }

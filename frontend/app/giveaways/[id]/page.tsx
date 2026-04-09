@@ -1,145 +1,170 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Save } from 'lucide-react';
+import { useParams } from 'next/navigation';
+import { useTelegram } from '@/app/providers/TelegramProvider';
+import NativeBackButton from '@/components/NativeBackButton';
 
 const API = 'https://api.randomway.pro/api/v1';
 
-export default function AdminGiveawayDetail() {
+export default function CreatorGiveawayPage() {
   const params = useParams();
   const giveawayId = params?.id;
-  const router = useRouter();
-  const [data, setData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const[selectedWinners, setSelectedWinners] = useState<Set<number>>(new Set());
-  const [isSaving, setIsSaving] = useState(false);
+  const { initData, haptic } = useTelegram();
+  const [status, setStatus] = useState<string>('loading');
+  const [winners, setWinners] = useState<any[]>([]);
+  const [analytics, setAnalytics] = useState<any>(null);
+  const [isDrawing, setIsDrawing] = useState(false);
 
-  useEffect(() => {
-    const token = localStorage.getItem('admin_token');
-    if (!token) { router.push('/admin/login'); return; }
-
-    fetch(`${API}/admin/giveaways/${giveawayId}`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    })
-      .then(res => res.json())
-      .then(d => {
-        setData(d);
-        const currentWinners = new Set<number>();
-        d.participants?.forEach((p: any) => { if (p.is_winner) currentWinners.add(p.user_id); });
-        setSelectedWinners(currentWinners);
-        setLoading(false);
-      });
-  },[giveawayId, router]);
-
-  const toggleWinner = (userId: number) => {
-    const newSet = new Set(selectedWinners);
-    if (newSet.has(userId)) newSet.delete(userId);
-    else newSet.add(userId);
-    setSelectedWinners(newSet);
+  const fetchData = async () => {
+    if (!initData || !giveawayId) return;
+    try {
+      const[statRes, anRes] = await Promise.all([
+        fetch(`${API}/giveaways/${giveawayId}/status`, { headers: { Authorization: `Bearer ${initData}` } }),
+        fetch(`${API}/giveaways/${giveawayId}/analytics`, { headers: { Authorization: `Bearer ${initData}` } })
+      ]);
+      const statData = await statRes.json();
+      const anData = await anRes.json();
+      
+      setStatus(statData.status);
+      if (statData.status === 'completed') setWinners(statData.winners ||[]);
+      setAnalytics(anData);
+    } catch (e) { console.error(e); }
   };
 
-  const handleSaveWinners = async () => {
-    const token = localStorage.getItem('admin_token');
-    setIsSaving(true);
+  useEffect(() => {
+    fetchData();
+    let interval: NodeJS.Timeout;
+    // Обновляем каждые 3 секунды, если идет подведение итогов
+    if (status === 'finalizing') interval = setInterval(fetchData, 3000);
+    return () => clearInterval(interval);
+  }, [initData, giveawayId, status]);
+
+  const handleExportCSV = async () => {
+    haptic?.impactOccurred('medium');
     try {
-      const res = await fetch(`${API}/admin/giveaways/${giveawayId}/set-winners`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ winner_ids: Array.from(selectedWinners) })
+      const res = await fetch(`${API}/giveaways/${giveawayId}/export`, {
+        headers: { 'Authorization': `Bearer ${initData}` }
       });
-      if (res.ok) alert('Победители успешно обновлены в базе!');
-      else alert('Ошибка при сохранении');
-    } finally {
-      setIsSaving(false);
+      if (!res.ok) {
+        const err = await res.json();
+        window.Telegram?.WebApp?.showAlert(err.detail || "Ошибка при формировании файла.");
+        return;
+      }
+      window.Telegram?.WebApp?.showAlert("Файл со списком участников отправлен вам в личные сообщения с ботом! 📄");
+      haptic?.notificationOccurred('success');
+    } catch (e) {
+      window.Telegram?.WebApp?.showAlert("Ошибка сети");
     }
   };
 
-  if (loading) return <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center text-white">Загрузка...</div>;
+  const handleFinalize = async () => {
+    const tg = window.Telegram?.WebApp;
+    tg?.showPopup({
+      message: 'Подвести итоги досрочно? Бот проверит всех участников.',
+      buttons:[{ id: 'cancel', type: 'cancel', text: 'Отмена' }, { id: 'ok', type: 'destructive', text: 'Запустить' }]
+    }, async (btn: string) => {
+      if (btn !== 'ok') return;
+      haptic?.impactOccurred('heavy');
+      setStatus('finalizing');
+      await fetch(`${API}/giveaways/${giveawayId}/finalize`, { method: 'POST', headers: { Authorization: `Bearer ${initData}` } });
+    });
+  };
+
+  const handleDrawAdditional = () => {
+    const tg = window.Telegram?.WebApp;
+    if (!tg) return;
+    tg.showPopup({
+      title: 'Дополнительные победители',
+      message: 'Сколько новых победителей нужно выбрать?',
+      buttons:[
+        { id: '1', type: 'default', text: 'Выбрать 1' },
+        { id: '3', type: 'default', text: 'Выбрать 3' },
+        { id: 'cancel', type: 'cancel', text: 'Отмена' }
+      ]
+    }, async (btnId: string) => {
+      if (!btnId || btnId === 'cancel') return;
+      const count = parseInt(btnId);
+      haptic?.impactOccurred('heavy');
+      setIsDrawing(true);
+      try {
+        const res = await fetch(`${API}/giveaways/${giveawayId}/draw-additional`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${initData}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ count })
+        });
+        if (res.ok) {
+          tg.showAlert(`Успешно! ${count} новых победителей выбраны. Пост отправлен в канал.`);
+          fetchData();
+        }
+      } finally {
+        setIsDrawing(false);
+      }
+    });
+  };
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white font-sans p-8">
-      <div className="max-w-6xl mx-auto pb-24">
-        {/* Шапка */}
-        <header className="flex items-center gap-4 mb-8">
-          <button onClick={() => router.push('/admin')} className="p-2 bg-white/5 hover:bg-white/10 rounded-lg transition-colors">
-            <ArrowLeft size={20} />
-          </button>
-          <div>
-            <h1 className="text-3xl font-bold">Розыгрыш #{data.info.id}</h1>
-            <p className="text-gray-400">{data.info.title}</p>
+    <main className="min-h-screen p-4 pt-6 flex flex-col animate-in fade-in duration-300 pb-20">
+      <NativeBackButton />
+      <h1 className="text-2xl font-bold text-white mb-6">Управление</h1>
+      
+      {analytics && (
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <div className="bg-[#2E2F33] p-4 rounded-xl text-center border border-white/5">
+            <p className="text-3xl font-bold text-white">{analytics.total_participants}</p>
+            <p className="text-xs text-gray-400 mt-1">Всего участников</p>
           </div>
-          <span className="ml-auto px-4 py-1.5 rounded-full text-sm font-bold uppercase tracking-wider bg-white/10">
-            {data.info.status}
-          </span>
-        </header>
-
-        {/* Статистика */}
-        <div className="bg-[#121212] border border-white/10 p-6 rounded-xl shadow-sm mb-8 grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div><p className="text-gray-400 text-xs uppercase mb-1">Призов</p><p className="font-bold">{data.info.winners_count}</p></div>
-          <div><p className="text-gray-400 text-xs uppercase mb-1">Капча</p><p className="font-bold">{data.info.use_captcha ? 'Да' : 'Нет'}</p></div>
-          <div><p className="text-gray-400 text-xs uppercase mb-1">Бусты</p><p className="font-bold">{data.info.use_boosts ? 'Да' : 'Нет'}</p></div>
-          <div><p className="text-gray-400 text-xs uppercase mb-1">Инвайты</p><p className="font-bold">{data.info.use_invites ? 'Да' : 'Нет'}</p></div>
-        </div>
-
-        {/* Таблица */}
-        <div className="bg-[#121212] border border-white/10 rounded-xl overflow-hidden shadow-sm">
-          <div className="p-6 border-b border-white/10 flex justify-between items-center">
-            <h2 className="text-lg font-bold">Участники ({data.participants.length})</h2>
-            <p className="text-sm text-gray-400">Выбрано победителей: <span className="text-white font-bold">{selectedWinners.size}</span></p>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-white/5 text-gray-400">
-                <tr>
-                  <th className="p-4 font-medium w-12">Победа</th>
-                  <th className="p-4 font-medium">Пользователь</th>
-                  <th className="p-4 font-medium text-center">Друзья</th>
-                  <th className="p-4 font-medium text-center">Буст</th>
-                  <th className="p-4 font-medium text-center">Статус</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-white/5">
-                {data.participants.map((p: any) => (
-                  <tr key={p.user_id} className={`transition-colors ${selectedWinners.has(p.user_id) ? 'bg-blue-500/10' : 'hover:bg-white/5'}`}>
-                    <td className="p-4 text-center">
-                      <input
-                        type="checkbox"
-                        checked={selectedWinners.has(p.user_id)}
-                        onChange={() => toggleWinner(p.user_id)}
-                        className="w-5 h-5 rounded border-gray-600 text-blue-500 cursor-pointer"
-                      />
-                    </td>
-                    <td className="p-4">
-                      <p className="font-bold text-white">{p.first_name}</p>
-                      <p className="text-gray-400 text-xs">{p.username ? `@${p.username}` : `ID: ${p.user_id}`}</p>
-                    </td>
-                    <td className="p-4 text-center font-bold text-gray-300">{p.invite_count}</td>
-                    <td className="p-4 text-center">{p.has_boosted ? `✅ (${p.boost_count})` : '—'}</td>
-                    <td className="p-4 text-center">
-                      {!p.is_active ? <span className="text-red-400 text-xs bg-red-500/10 px-2 py-1 rounded">Хитрец</span> : <span className="text-green-400 text-xs bg-green-500/10 px-2 py-1 rounded">Активен</span>}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="bg-[#2E2F33] p-4 rounded-xl text-center border border-white/5">
+            <p className="text-3xl font-bold text-red-400">{analytics.cheaters_caught}</p>
+            <p className="text-xs text-gray-400 mt-1">Отписались (Хитрецы)</p>
           </div>
         </div>
-      </div>
+      )}
 
-      {/* Кнопка сохранения */}
-      <div className="fixed bottom-0 left-0 right-0 p-4 bg-[#0a0a0a]/90 backdrop-blur-md border-t border-white/10 flex justify-center">
+      {analytics && (
         <button
-          onClick={handleSaveWinners}
-          disabled={isSaving}
-          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-8 rounded-xl shadow-lg transition-transform active:scale-95 disabled:opacity-50"
+          onClick={handleExportCSV}
+          className="w-full mb-6 flex items-center justify-center gap-2 py-3 rounded-xl bg-white/5 border border-white/10 text-white font-medium active:scale-95 transition-transform"
         >
-          <Save size={20} />
-          {isSaving ? "Сохранение..." : "Принудительно назначить победителей"}
+          <span className="text-lg">📊</span> Скачать список (в чат с ботом)
         </button>
-      </div>
-    </div>
+      )}
+
+      {status === 'active' && (
+        <button onClick={handleFinalize} className="w-full mt-2 h-14 rounded-2xl font-bold text-[16px] bg-red-500/10 text-red-500 border border-red-500/20 active:scale-95 transition-transform">
+          Подвести итоги досрочно
+        </button>
+      )}
+
+      {status === 'finalizing' && (
+        <div className="flex flex-col items-center text-center mt-10">
+          <div className="w-12 h-12 border-4 border-[#0095FF] border-t-transparent rounded-full animate-spin"></div>
+          <p className="text-gray-400 mt-4">Бот проверяет подписки и крутит рулетку...</p>
+        </div>
+      )}
+
+      {status === 'completed' && (
+        <div className="mt-4">
+          <div className="flex justify-between items-end mb-4">
+            <h3 className="font-bold text-white">🏆 Победители ({winners.length}):</h3>
+            <button onClick={handleDrawAdditional} disabled={isDrawing} className="text-xs font-medium bg-[#0095FF]/10 text-[#0095FF] px-3 py-1.5 rounded-lg active:scale-95 disabled:opacity-50 transition-colors">
+              {isDrawing ? "Выбираем..." : "+ Довыбрать"}
+            </button>
+          </div>
+          <div className="flex flex-col gap-3">
+            {winners.map((w, i) => (
+              <div key={i} className="bg-[#2E2F33] p-4 rounded-xl flex items-center justify-between border-white/5">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-sm font-bold text-white">{i + 1}</div>
+                  <div>
+                    <p className="font-medium text-white">{w.name}</p>
+                    {w.username && <p className="text-xs text-gray-400">@{w.username}</p>}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </main>
   );
 }
