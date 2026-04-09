@@ -37,7 +37,6 @@ def _make_join_button(text: str, url: str, color: str, custom_emoji_id: str | No
     style = BUTTON_STYLE_MAP.get(color)
     if style:
         btn["style"] = style
-    # custom_emoji_id не работает в каналах — не добавляем
     return btn
 
 
@@ -145,7 +144,6 @@ class GiveawayService:
         bot_info = await bot.get_me()
         url = f"https://t.me/{bot_info.username}/{os.getenv('MINI_APP_SHORT_NAME', 'app')}?startapp=gw_{giveaway.id}"
 
-        # В превью для бота показываем с кастомным эмодзи (если есть)
         btn_text = giveaway.button_text if giveaway.button_custom_emoji_id \
             else f"{giveaway.button_color_emoji}{giveaway.button_text}"
         join_btn: dict = {"text": btn_text, "url": url}
@@ -192,7 +190,6 @@ class GiveawayService:
                 bot_info = await bot.get_me()
                 url = f"https://t.me/{bot_info.username}/{os.getenv('MINI_APP_SHORT_NAME', 'app')}?startapp=gw_{giveaway.id}"
 
-                # Текущий счётчик участников
                 count = await db.scalar(
                     select(func.count(Participant.id))
                     .where(Participant.giveaway_id == giveaway_id)
@@ -202,7 +199,6 @@ class GiveawayService:
 
                 for ch in channels:
                     try:
-                        # Кнопка со счётчиком для канала
                         btn = _make_join_button_with_count(
                             text=btn_text,
                             url=url,
@@ -330,7 +326,6 @@ class GiveawayService:
 
                     winners_text = "\n".join(winners_lines)
 
-                    # Ссылка на проверку результатов через /start (не через Mini App)
                     check_url = f"https://t.me/{bot_info.username}?start=checklot{giveaway_id}"
 
                     text = (
@@ -342,27 +337,25 @@ class GiveawayService:
                     result_channels = await channel_repo.get_by_ids(db, giveaway.result_channel_ids)
                     for ch in result_channels:
                         params: dict = {
-                            "chat_id":    ch.telegram_id,
-                            "text":       text,
+                            "chat_id": ch.telegram_id,
+                            "text": text,
                             "parse_mode": "HTML",
                             "disable_web_page_preview": True,
                         }
-                        if (giveaway.post_channel_id == ch.telegram_id
-                                and giveaway.post_message_id):
+                        if giveaway.post_channel_id == ch.telegram_id and giveaway.post_message_id:
                             params["reply_to_message_id"] = giveaway.post_message_id
 
                         try:
                             async with aiohttp.ClientSession() as session:
-                                resp = await session.post(
-                                    f"https://api.telegram.org/bot{bot.token}/sendMessage",
-                                    json=params
-                                )
-                                result_data = await resp.json()
-                                if not result_data.get("ok"):
-                                    logging.error(
-                                        f"Failed to post results to {ch.title}: {result_data}")
-                                else:
-                                    logging.info(f"Results posted to {ch.title} ✅")
+                                url = f"https://api.telegram.org/bot{bot.token}/sendMessage"
+                                async with session.post(url, json=params) as resp:
+                                    r_data = await resp.json()
+                                    # Если ошибка из-за удаленного сообщения, отправляем без реплая
+                                    if not r_data.get("ok") and "reply" in r_data.get("description", "").lower():
+                                        params.pop("reply_to_message_id", None)
+                                        await session.post(url, json=params)
+                                    elif not r_data.get("ok"):
+                                        logging.error(f"Failed to post results to {ch.telegram_id}: {r_data}")
                         except Exception as e:
                             logging.error(f"Result post error for {ch.title}: {e}")
 
@@ -485,6 +478,42 @@ class GiveawayService:
                 await bot.send_message(chat_id=ch.telegram_id, text=post)
 
         return {"status": "success", "drawn_count": len(nw)}
+
+    async def update_giveaway_button_count(self, db: AsyncSession, bot: Bot, giveaway_id: int):
+        giveaway = await giveaway_repo.get_by_id(db, giveaway_id)
+        if not giveaway or not giveaway.post_message_id or not giveaway.post_channel_id:
+            return
+        
+        # Получаем количество участников
+        p_count = await participant_repo.count_by_giveaway(db, giveaway_id)
+        
+        # Обновляем текст кнопки
+        base_text = giveaway.button_text if giveaway.button_custom_emoji_id else f"{giveaway.button_color_emoji}{giveaway.button_text}"
+        new_text = f"{base_text} ({p_count})" if p_count > 0 else base_text
+        
+        bot_info = await bot.get_me()
+        url = f"https://t.me/{bot_info.username}/{os.getenv('MINI_APP_SHORT_NAME', 'app')}?startapp=gw_{giveaway.id}"
+        
+        btn = _make_join_button(
+            text=new_text,
+            url=url, 
+            color=giveaway.button_color,
+            custom_emoji_id=giveaway.button_custom_emoji_id,
+        )
+
+        params = {
+            "chat_id": giveaway.post_channel_id,
+            "message_id": giveaway.post_message_id,
+            "reply_markup": {"inline_keyboard": [[btn]]}
+        }
+        
+        # Отправляем запрос на изменение кнопки. Игнорируем ошибки лимитов (429)
+        async with aiohttp.ClientSession() as session:
+            url = f"https://api.telegram.org/bot{bot.token}/editMessageReplyMarkup"
+            try:
+                await session.post(url, json=params)
+            except Exception:
+                pass # Игнорируем спам-ошибки от Telegram
 
 
 giveaway_service = GiveawayService()

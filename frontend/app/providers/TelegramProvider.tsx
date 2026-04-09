@@ -2,7 +2,6 @@
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 
-// 🚀 ПРОСТО ОБЪЯВЛЯЕМ API ЗДЕСЬ, ЧТОБЫ TS НЕ ТЕРЯЛ ФАЙЛ
 const API = 'https://api.randomway.pro/api/v1';
 
 interface TelegramUser {
@@ -15,60 +14,8 @@ interface TelegramUser {
 interface TelegramContextType {
   user: TelegramUser | null;
   initData: string;
-  haptic: TelegramHaptic | null;
+  haptic: any | null;
   isLoading: boolean;
-}
-
-interface TelegramHaptic {
-  impactOccurred: (style: 'light' | 'medium' | 'heavy' | 'rigid' | 'soft') => void;
-  notificationOccurred: (type: 'error' | 'success' | 'warning') => void;
-  selectionChanged: () => void;
-}
-
-interface PopupButton {
-  id?: string;
-  type?: 'default' | 'ok' | 'close' | 'cancel' | 'destructive';
-  text?: string;
-}
-
-interface PopupParams {
-  title?: string;
-  message: string;
-  buttons?: PopupButton[];
-}
-
-// Полная типизация WebApp
-interface TelegramWebApp {
-  ready: () => void;
-  expand: () => void;
-  close: () => void;
-  isFullscreen: boolean;
-  exitFullscreen: () => void;
-  requestFullscreen: () => void;
-  initData: string;
-  initDataUnsafe: { user?: TelegramUser; start_param?: string };
-  colorScheme: 'light' | 'dark';
-  platform: string; // ➕ Добавили platform
-  openTelegramLink: (url: string) => void;
-  openLink: (url: string) => void;
-  showPopup: (params: PopupParams, callback?: (buttonId: string) => void) => void;
-  showAlert: (message: string, callback?: () => void) => void;
-  HapticFeedback: TelegramHaptic;
-  BackButton: {
-    show: () => void;
-    hide: () => void;
-    onClick: (cb: () => void) => void;
-    offClick: (cb: () => void) => void;
-  };
-  
-  // 🚀 ДОБАВЛЯЕМ НОВЫЙ МЕТОД ДЛЯ СТОРИС СЮДА:
-  shareToStory: (media_url: string, params?: { text?: string }) => void;
-}
-
-declare global {
-  interface Window {
-    Telegram?: { WebApp: TelegramWebApp };
-  }
 }
 
 const TelegramContext = createContext<TelegramContextType>({
@@ -81,86 +28,81 @@ const TelegramContext = createContext<TelegramContextType>({
 export function TelegramProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<TelegramUser | null>(null);
   const [initData, setInitData] = useState('');
-  const [haptic, setHaptic] = useState<TelegramHaptic | null>(null);
+  const[haptic, setHaptic] = useState<any | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  
-  // ➕ СОСТОЯНИЕ БЛОКИРОВКИ
   const [isWebBlocked, setIsWebBlocked] = useState(false);
-  const [isAdminRoute, setIsAdminRoute] = useState(false); // 🚀 НОВОЕ
+  const[isAdminRoute, setIsAdminRoute] = useState(false);
 
   useEffect(() => {
-    // 🚀 ПРОВЕРЯЕМ: Если мы заходим в админку, отключаем логику Telegram!
+    // 1. Проверяем, не находимся ли мы в админке
     if (typeof window !== 'undefined' && window.location.pathname.startsWith('/admin')) {
       setIsAdminRoute(true);
       setIsLoading(false);
-      return;
+      return; // Выходим, в админке Telegram логика не нужна
     }
 
     const tg = window.Telegram?.WebApp;
-
     if (!tg) {
-      // Локальная разработка без Telegram
+      // Если это не админка, и нет Telegram - блокируем
+      setIsWebBlocked(true);
       setIsLoading(false);
       return;
     }
 
     tg.ready();
     tg.expand();
-    
     if (tg.isFullscreen) {
       tg.exitFullscreen();
     }
 
-    // 🛡 ЗАЩИТА: Проверяем платформу
+    // 2. Проверяем платформу (Блокируем обычные браузеры)
     const platform = tg.platform || '';
-    if (['weba', 'webk', 'web'].includes(platform)) {
+    if (['weba', 'webk', 'web', 'unknown'].includes(platform)) {
       setIsWebBlocked(true);
       setIsLoading(false);
-      return; // Останавливаем инициализацию
+      return;
     }
 
-    // Тема
     document.documentElement.classList.toggle('dark', tg.colorScheme === 'dark');
 
-    // Данные пользователя
     const tgUser = tg.initDataUnsafe?.user;
     if (tgUser) setUser(tgUser);
-
+    
     setInitData(tg.initData);
     setHaptic(tg.HapticFeedback);
     setIsLoading(false);
-  }, []);
 
-  // Авторизация на бэкенде
+  },[]);
+
   useEffect(() => {
-    if (!initData) return;
-
-    // <--- ЗАМЕНА ССЫЛКИ НА КОНСТАНТУ
+    if (!initData || isAdminRoute) return;
+    
+    // Авторизация пользователя на бэкенде
     fetch(`${API}/auth`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ initData }),
     }).catch(() => console.warn('Auth failed'));
-  }, [initData]);
+  }, [initData, isAdminRoute]);
 
-  // 🛡 ЕСЛИ ЭТО WEB-ВЕРСИЯ И ЭТО НЕ АДМИНКА — ПОКАЗЫВАЕМ ЭКРАН ОШИБКИ
-  if (isWebBlocked && !isAdminRoute) {
+  // Если это админка — просто рендерим детей
+  if (isAdminRoute) {
+    return <>{children}</>;
+  }
+
+  // Заглушка для тех, кто открыл с компа в браузере (не админ)
+  if (isWebBlocked) {
     return (
       <div className="min-h-screen bg-[#0a0a0a] flex flex-col items-center justify-center p-6 text-center">
         <span className="text-6xl mb-6">📱</span>
         <h1 className="text-2xl font-bold text-white mb-2">Доступ ограничен</h1>
         <p className="text-gray-400 text-sm">
-          В целях безопасности и для корректной работы, приложение доступно только с мобильных устройств (iOS / Android) или из десктопного приложения Telegram.
-          <br/><br/>
-          Пожалуйста, откройте бота на телефоне или в приложении для ПК.
+          Приложение доступно только внутри Telegram (на телефоне или в приложении для ПК).
+          <br /><br />
+          Пожалуйста, откройте бота в приложении Telegram.
         </p>
       </div>
     );
-  }
-
-  // 🚀 ЕСЛИ ЭТО АДМИНКА — ПРОСТО ОТДАЕМ ДЕТЕЙ (БЕЗ КОНТЕКСТА ТЕЛЕГРАМА)
-  if (isAdminRoute) {
-    return <>{children}</>;
   }
 
   return (

@@ -94,6 +94,11 @@ class ParticipantService:
         if ref_code:
             await participant_repo.increment_invite(db, ref_code)
 
+        # ДОБАВИТЬ ЭТО: Обновляем счетчик на кнопке в фоне (не блокируя ответ юзеру)
+        import asyncio
+        from services.giveaway_service import giveaway_service
+        asyncio.create_task(giveaway_service.update_giveaway_button_count(db, bot, giveaway_id))
+
         boost_url = await self._get_boost_url(db, giveaway)
 
         return {

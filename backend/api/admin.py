@@ -81,7 +81,7 @@ async def get_giveaway_details(
             "username":    u.username,
             "invite_count": p.invite_count,
             "has_boosted": p.has_boosted,
-            "story_clicks": 0,          # поле удалено из модели
+            "story_clicks": 0,
             "is_active":   p.is_active,
             "is_winner":   p.is_winner,
         })
@@ -94,7 +94,7 @@ async def get_giveaway_details(
             "winners_count": giveaway.winners_count,
             "use_boosts":    giveaway.use_boosts,
             "use_invites":   giveaway.use_invites,
-            "use_stories":   False,      # поле удалено из модели
+            "use_stories":   False,
             "use_captcha":   giveaway.use_captcha,
         },
         "participants": parts_data
@@ -130,9 +130,6 @@ async def manual_set_winners(
             .values(is_winner=True)
         )
 
-    # ✅ БАГ 3 ИСПРАВЛЕН: НЕ меняем статус розыгрыша
-    # Розыгрыш остаётся в текущем статусе — участники могут продолжать участвовать
-    # Победители просто помечаются в базе, финальный результат будет при завершении
     await db.commit()
 
-    return {"status": "success", "message": "Победители обновлены. Статус розыгрыша не изменён."}
+    return {"status": "success", "message": "Победители обновлены."}

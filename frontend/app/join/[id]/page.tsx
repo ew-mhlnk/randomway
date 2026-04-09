@@ -3,6 +3,14 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useTelegram } from '@/app/providers/TelegramProvider';
 
+// === ДОБАВЬ ВОТ ЭТОТ БЛОК ===
+declare global {
+  interface Window {
+    Telegram?: any;
+  }
+}
+// ===========================
+
 const API = 'https://api.randomway.pro/api/v1';
 const BOT  = process.env.NEXT_PUBLIC_BOT_USERNAME   || 'randomwaybot';
 const APP  = process.env.NEXT_PUBLIC_APP_SHORT_NAME || 'app';
@@ -39,54 +47,6 @@ function formatCountdown(endDate: string): string {
 
 function calcMultiplier(p: PInfo): number {
   return 1 + Math.min(p.boost_count, 10) + Math.min(p.invite_count, 100);
-}
-
-// Единый экран загрузки — показывается пока идёт любой запрос
-function LoadingScreen({ mascotSrc }: { mascotSrc: string }) {
-  return (
-    <div style={{
-      position: 'fixed', inset: 0, background: '#0B0B0B',
-      display: 'flex', flexDirection: 'column',
-      alignItems: 'center', justifyContent: 'center', gap: 24,
-      zIndex: 9999,
-    }}>
-      <style>{`
-        @keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
-        @keyframes spin{to{transform:rotate(360deg)}}
-      `}</style>
-
-      {/* Маскот с пульсом */}
-      <div style={{ width: 160, height: 160, borderRadius: 28,
-        overflow: 'hidden', position: 'relative' }}>
-        <img src={mascotSrc} alt="mascot"
-          style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-        <div style={{ position: 'absolute', inset: 0, borderRadius: 28,
-          background: 'radial-gradient(circle, rgba(0,149,255,0.18) 0%, transparent 70%)',
-          animation: 'pulse 1.6s ease-in-out infinite' }} />
-      </div>
-
-      {/* Бегунок */}
-      <div style={{ width: 160, height: 3, background: 'rgba(255,255,255,0.08)',
-        borderRadius: 2, overflow: 'hidden' }}>
-        <div style={{
-          height: '100%', width: '40%', borderRadius: 2,
-          background: 'linear-gradient(90deg, #0095FF, #FF09D2)',
-          animation: 'slideProgress 1.4s ease-in-out infinite',
-        }} />
-      </div>
-      <style>{`
-        @keyframes slideProgress {
-          0%   { transform: translateX(-100%); width: 40%; }
-          50%  { width: 60%; }
-          100% { transform: translateX(400%); width: 40%; }
-        }
-      `}</style>
-
-      <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>
-        Проверяем условия участия...
-      </p>
-    </div>
-  );
 }
 
 export default function JoinPage() {
@@ -161,6 +121,9 @@ export default function JoinPage() {
     if (!initData || !id) return;
     setScreen('checking');
     try {
+      // Искусственная пауза для плавности UI (опционально)
+      await new Promise(r => setTimeout(r, 600)); 
+
       const res = await fetch(`${API}/giveaways/${id}/join`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${initData}` },
@@ -241,10 +204,26 @@ export default function JoinPage() {
 
   const mascotSrc = gw?.mascot_id ? `/mascots/${gw.mascot_id}.webp` : '/mascots/1-duck.webp';
 
-  // ── БАГ 5: единый экран загрузки пока идут запросы ───────────────────────
-  if (screen === 'initial' || screen === 'loading' || screen === 'checking') {
-    return <LoadingScreen mascotSrc={mascotSrc} />;
-  }
+  // ── БАГ 5: единый легкий экран загрузки (без утки, чтобы не моргало) ───────
+  if (screen === 'initial' || screen === 'loading' || screen === 'checking') return (
+    <div style={{
+      minHeight: '100vh', background: '#0B0B0B', display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center', gap: 24, padding: '0 24px',
+    }}>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+      
+      {/* Строгий и красивый лоадер вместо прыгающей утки */}
+      <div style={{
+        width: 60, height: 60, border: '4px solid rgba(0,149,255,0.2)',
+        borderTopColor: '#0095FF', borderRadius: '50%',
+        animation: 'spin 1s linear infinite'
+      }} />
+      
+      <p style={{ fontSize: 16, color: 'rgba(255,255,255,0.8)', textAlign: 'center', fontWeight: 500 }}>
+        {screen === 'loading' ? 'Загрузка розыгрыша...' : screen === 'checking' ? 'Проверка условий...' : ''}
+      </p>
+    </div>
+  );
 
   // ── CAPTCHA ───────────────────────────────────────────────────────────────
   if (screen === 'captcha') return (
