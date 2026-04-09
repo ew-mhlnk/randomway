@@ -7,7 +7,15 @@ const API = 'https://api.randomway.pro/api/v1';
 const BOT  = process.env.NEXT_PUBLIC_BOT_USERNAME   || 'randomwaybot';
 const APP  = process.env.NEXT_PUBLIC_APP_SHORT_NAME || 'app';
 
-type Screen = 'loading' | 'captcha' | 'checking' | 'missing' | 'joined' | 'done';
+// ── БАГ 4 ИСПРАВЛЕН: реферальная ссылка должна вести через /start бота,
+// а не через Mini App short name напрямую
+// Формат: https://t.me/BOT?start=gw_ID_ref_CODE  (открывает бота, бот редиректит в МА)
+// Но так как у нас Mini App — используем tg://resolve с startapp параметром
+function makeRefLink(id: string, refCode: string): string {
+  return `https://t.me/${BOT}/${APP}?startapp=gw_${id}_ref_${refCode}`;
+}
+
+type Screen = 'initial' | 'loading' | 'captcha' | 'checking' | 'missing' | 'joined' | 'done';
 type BoostTab = 'boosts' | 'invites';
 
 interface GWInfo {
@@ -17,7 +25,7 @@ interface GWInfo {
 }
 interface PInfo {
   referral_code: string; invite_count: number;
-  has_boosted: boolean; boost_count: number; story_clicks: number;
+  has_boosted: boolean; boost_count: number;
 }
 
 function formatCountdown(endDate: string): string {
@@ -33,8 +41,53 @@ function calcMultiplier(p: PInfo): number {
   return 1 + Math.min(p.boost_count, 10) + Math.min(p.invite_count, 100);
 }
 
-// Импорт Turnstile — ленивый, только если нужен
-let TurnstileComponent: any = null;
+// Единый экран загрузки — показывается пока идёт любой запрос
+function LoadingScreen({ mascotSrc }: { mascotSrc: string }) {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: '#0B0B0B',
+      display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center', gap: 24,
+      zIndex: 9999,
+    }}>
+      <style>{`
+        @keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
+        @keyframes spin{to{transform:rotate(360deg)}}
+      `}</style>
+
+      {/* Маскот с пульсом */}
+      <div style={{ width: 160, height: 160, borderRadius: 28,
+        overflow: 'hidden', position: 'relative' }}>
+        <img src={mascotSrc} alt="mascot"
+          style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        <div style={{ position: 'absolute', inset: 0, borderRadius: 28,
+          background: 'radial-gradient(circle, rgba(0,149,255,0.18) 0%, transparent 70%)',
+          animation: 'pulse 1.6s ease-in-out infinite' }} />
+      </div>
+
+      {/* Бегунок */}
+      <div style={{ width: 160, height: 3, background: 'rgba(255,255,255,0.08)',
+        borderRadius: 2, overflow: 'hidden' }}>
+        <div style={{
+          height: '100%', width: '40%', borderRadius: 2,
+          background: 'linear-gradient(90deg, #0095FF, #FF09D2)',
+          animation: 'slideProgress 1.4s ease-in-out infinite',
+        }} />
+      </div>
+      <style>{`
+        @keyframes slideProgress {
+          0%   { transform: translateX(-100%); width: 40%; }
+          50%  { width: 60%; }
+          100% { transform: translateX(400%); width: 40%; }
+        }
+      `}</style>
+
+      <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>
+        Проверяем условия участия...
+      </p>
+    </div>
+  );
+}
 
 export default function JoinPage() {
   const params  = useParams();
@@ -42,50 +95,60 @@ export default function JoinPage() {
   const id      = params?.id as string;
   const { initData, haptic } = useTelegram();
 
-  const [screen, setScreen]   = useState<Screen>('loading');
+  const [screen, setScreen]   = useState<Screen>('initial');
   const [gw, setGw]           = useState<GWInfo | null>(null);
   const [part, setPart]       = useState<PInfo | null>(null);
   const [missing, setMissing] = useState<any[]>([]);
   const [refCode, setRefCode] = useState<string | null>(null);
-  const [boostOpen, setBoostOpen]     = useState(false);
-  const [activeTab, setActiveTab]     = useState<BoostTab>('boosts');
+  const [boostOpen, setBoostOpen]         = useState(false);
+  const [activeTab, setActiveTab]         = useState<BoostTab>('boosts');
   const [checkingBoost, setCheckingBoost] = useState(false);
-  const [countdown, setCountdown]     = useState('');
-  const [TurnstileLoaded, setTurnstileLoaded] = useState(false);
+  const [countdown, setCountdown]         = useState('');
+  const [TurnstileComp, setTurnstileComp] = useState<any>(null);
   const turnstileRef = useRef<any>(null);
   const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || '';
 
-  // Загружаем Turnstile только когда нужен
+  // Загружаем Turnstile лениво
   useEffect(() => {
-    if (screen === 'captcha' && !TurnstileLoaded) {
-      import('@marsidev/react-turnstile').then(m => {
-        TurnstileComponent = m.Turnstile;
-        setTurnstileLoaded(true);
-      });
+    if (screen === 'captcha' && !TurnstileComp) {
+      import('@marsidev/react-turnstile').then(m => setTurnstileComp(() => m.Turnstile));
     }
   }, [screen]);
 
-  /* Ref из startParam */
+  // ── БАГ 4: читаем ref из start_param ──────────────────────────────────────
   useEffect(() => {
-    const sp = (window.Telegram?.WebApp?.initDataUnsafe as any)?.start_param || '';
-    if (sp.includes('_ref_')) setRefCode(sp.split('_ref_')[1]);
+    const tg  = window.Telegram?.WebApp;
+    const sp  = (tg?.initDataUnsafe as any)?.start_param || '';
+    // Формат: gw_ID_ref_CODE
+    if (sp.includes('_ref_')) {
+      setRefCode(sp.split('_ref_')[1]);
+    }
   }, []);
 
+  // Загрузка данных розыгрыша
   useEffect(() => {
     if (!id) return;
+    setScreen('loading');
     fetch(`${API}/giveaways/${id}/public`)
       .then(r => { if (!r.ok) throw new Error(); return r.json(); })
       .then(data => {
         setGw(data);
-        if (['completed','finalizing','cancelled'].includes(data.status)) {
+        if (['completed', 'finalizing', 'cancelled'].includes(data.status)) {
           setScreen('done');
-        } else {
-          doJoin(null, data);
         }
+        // doJoin вызовем после того как initData будет готов
       })
       .catch(() => setScreen('done'));
   }, [id]);
 
+  // Как только есть и gw и initData — пробуем войти
+  useEffect(() => {
+    if (gw && initData && screen === 'loading') {
+      doJoin(null);
+    }
+  }, [gw, initData]);
+
+  // Таймер обратного отсчёта
   useEffect(() => {
     if (!gw?.end_date) return;
     const tick = () => setCountdown(formatCountdown(gw.end_date!));
@@ -94,9 +157,8 @@ export default function JoinPage() {
     return () => clearInterval(t);
   }, [gw?.end_date]);
 
-  const doJoin = useCallback(async (token: string | null, gwData?: GWInfo) => {
+  const doJoin = useCallback(async (token: string | null) => {
     if (!initData || !id) return;
-    const currentGw = gwData ?? gw;
     setScreen('checking');
     try {
       const res = await fetch(`${API}/giveaways/${id}/join`, {
@@ -105,8 +167,9 @@ export default function JoinPage() {
         body: JSON.stringify({ ref_code: refCode, captcha_token: token }),
       });
       const data = await res.json();
+
       if (!res.ok) {
-        if (currentGw?.use_captcha && data.detail?.includes('Капча')) {
+        if (gw?.use_captcha && data.detail?.includes('Капча')) {
           setScreen('captcha');
           setTimeout(() => turnstileRef.current?.reset(), 400);
         } else {
@@ -115,25 +178,29 @@ export default function JoinPage() {
         }
         return;
       }
+
       if (data.status === 'missing_subscriptions') {
-        setMissing(data.channels); setScreen('missing');
+        setMissing(data.channels);
+        setScreen('missing');
         haptic?.notificationOccurred('warning');
         return;
       }
+
       setPart(data.participant);
       if (data.giveaway) setGw(prev => ({ ...prev!, ...data.giveaway }));
       setScreen('joined');
-      
-      // 🎵 "Играющая" вибрация при входе в розыгрыш
+
+      // 🎵 "Играющая" вибрация
       haptic?.notificationOccurred('success');
-      setTimeout(() => haptic?.impactOccurred('light'), 100);
+      setTimeout(() => haptic?.impactOccurred('light'),  100);
       setTimeout(() => haptic?.impactOccurred('medium'), 220);
-      setTimeout(() => haptic?.impactOccurred('light'), 380);
-      setTimeout(() => haptic?.impactOccurred('heavy'), 520);
-      
+      setTimeout(() => haptic?.impactOccurred('light'),  380);
+      setTimeout(() => haptic?.impactOccurred('heavy'),  520);
+
     } catch {
       window.Telegram?.WebApp.showAlert('Ошибка соединения');
-      if (currentGw?.use_captcha) setScreen('captcha');
+      if (gw?.use_captcha) setScreen('captcha');
+      else setScreen('done');
     }
   }, [initData, id, refCode, gw]);
 
@@ -142,7 +209,7 @@ export default function JoinPage() {
     setCheckingBoost(true);
     haptic?.impactOccurred('medium');
     try {
-      const res = await fetch(`${API}/giveaways/${id}/check-boost`, {
+      const res  = await fetch(`${API}/giveaways/${id}/check-boost`, {
         method: 'POST', headers: { Authorization: `Bearer ${initData}` },
       });
       const data = await res.json();
@@ -157,7 +224,7 @@ export default function JoinPage() {
 
   const shareInvite = () => {
     if (!part?.referral_code) return;
-    const link = `https://t.me/${BOT}/${APP}?startapp=gw_${id}_ref_${part.referral_code}`;
+    const link = makeRefLink(id, part.referral_code);
     haptic?.impactOccurred('medium');
     window.Telegram?.WebApp.openTelegramLink(
       `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent('🎁 Участвуй в розыгрыше!')}`
@@ -166,7 +233,7 @@ export default function JoinPage() {
 
   const copyInvite = async () => {
     if (!part?.referral_code) return;
-    const link = `https://t.me/${BOT}/${APP}?startapp=gw_${id}_ref_${part.referral_code}`;
+    const link = makeRefLink(id, part.referral_code);
     try { await navigator.clipboard.writeText(link); } catch {}
     haptic?.notificationOccurred('success');
     window.Telegram?.WebApp.showAlert('Ссылка скопирована!');
@@ -174,43 +241,28 @@ export default function JoinPage() {
 
   const mascotSrc = gw?.mascot_id ? `/mascots/${gw.mascot_id}.webp` : '/mascots/1-duck.webp';
 
-  // ── LOADING / CHECKING ──────────────────────────────────────────────────────
-  if (screen === 'loading' || screen === 'checking') return (
-    <div style={{
-      minHeight: '100vh', background: '#0B0B0B', display: 'flex', flexDirection: 'column',
-      alignItems: 'center', justifyContent: 'center', gap: 24, padding: '0 24px',
-    }}>
-      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}`}</style>
-      <div style={{ width: 160, height: 160, borderRadius: 28, overflow: 'hidden', position: 'relative' }}>
-        <img src={mascotSrc} alt="mascot" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-        <div style={{ position: 'absolute', inset: 0, borderRadius: 28,
-          background: 'radial-gradient(circle, rgba(0,149,255,0.18) 0%, transparent 70%)',
-          animation: 'pulse 1.6s ease-in-out infinite' }} />
-      </div>
-      <p style={{ fontSize: 15, color: 'rgba(255,255,255,0.75)', textAlign: 'center', lineHeight: 1.5 }}>
-        Проверяем соблюдение условий...
-      </p>
-      <div style={{ display: 'flex', gap: 6 }}>
-        {[0,1,2].map(i => (
-          <div key={i} style={{ width: 6, height: 6, borderRadius: '50%', background: '#0095FF',
-            animation: `pulse 1.2s ease-in-out ${i * 0.2}s infinite` }} />
-        ))}
-      </div>
-    </div>
-  );
+  // ── БАГ 5: единый экран загрузки пока идут запросы ───────────────────────
+  if (screen === 'initial' || screen === 'loading' || screen === 'checking') {
+    return <LoadingScreen mascotSrc={mascotSrc} />;
+  }
 
-  // ── CAPTCHA ─────────────────────────────────────────────────────────────────
+  // ── CAPTCHA ───────────────────────────────────────────────────────────────
   if (screen === 'captcha') return (
-    <div style={{ minHeight: '100vh', background: '#0B0B0B', display: 'flex', flexDirection: 'column',
-      alignItems: 'center', justifyContent: 'center', padding: '0 24px', textAlign: 'center' }}>
+    <div style={{ minHeight: '100vh', background: '#0B0B0B', display: 'flex',
+      flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      padding: '0 24px', textAlign: 'center' }}>
       <span style={{ fontSize: 56, marginBottom: 16 }}>🤖</span>
-      <h2 style={{ fontSize: 22, fontWeight: 700, color: '#fff', marginBottom: 8 }}>Защита от ботов</h2>
-      <p style={{ fontSize: 14, color: '#7D7D7D', marginBottom: 28 }}>Подтвердите, что вы человек.</p>
+      <h2 style={{ fontSize: 22, fontWeight: 700, color: '#fff', marginBottom: 8 }}>
+        Защита от ботов
+      </h2>
+      <p style={{ fontSize: 14, color: '#7D7D7D', marginBottom: 28 }}>
+        Подтвердите, что вы человек.
+      </p>
       <div style={{ background: 'rgba(255,255,255,0.04)', padding: 10, borderRadius: 18,
         border: '1px solid rgba(255,255,255,0.08)', minHeight: 65, minWidth: 300,
         display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        {TurnstileLoaded && TurnstileComponent && siteKey
-          ? <TurnstileComponent ref={turnstileRef} siteKey={siteKey}
+        {TurnstileComp && siteKey
+          ? <TurnstileComp ref={turnstileRef} siteKey={siteKey}
               onSuccess={(token: string) => { haptic?.impactOccurred('medium'); doJoin(token); }}
               options={{ theme: 'dark' }} />
           : <span style={{ color: '#7D7D7D', fontSize: 13 }}>Загрузка...</span>}
@@ -218,14 +270,18 @@ export default function JoinPage() {
     </div>
   );
 
-  // ── MISSING SUBSCRIPTIONS ───────────────────────────────────────────────────
+  // ── MISSING SUBSCRIPTIONS ─────────────────────────────────────────────────
   if (screen === 'missing') return (
-    <div style={{ minHeight: '100vh', background: '#0B0B0B', display: 'flex', flexDirection: 'column',
-      padding: '0 16px' }}>
+    <div style={{ minHeight: '100vh', background: '#0B0B0B',
+      display: 'flex', flexDirection: 'column', padding: '0 16px' }}>
       <div style={{ textAlign: 'center', paddingTop: 60, paddingBottom: 24 }}>
         <span style={{ fontSize: 56, display: 'block', marginBottom: 16 }}>👀</span>
-        <h2 style={{ fontSize: 22, fontWeight: 700, color: '#fff', marginBottom: 8 }}>Почти готово!</h2>
-        <p style={{ fontSize: 14, color: '#7D7D7D' }}>Подпишитесь на каналы для участия:</p>
+        <h2 style={{ fontSize: 22, fontWeight: 700, color: '#fff', marginBottom: 8 }}>
+          Почти готово!
+        </h2>
+        <p style={{ fontSize: 14, color: '#7D7D7D' }}>
+          Подпишитесь на каналы для участия:
+        </p>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
         {missing.map((ch, i) => (
@@ -235,8 +291,9 @@ export default function JoinPage() {
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
               textDecoration: 'none' }}>
             <span style={{ fontSize: 15, fontWeight: 500, color: '#fff' }}>{ch.title}</span>
-            <span style={{ background: 'rgba(0,149,255,0.15)', border: '1px solid rgba(0,149,255,0.3)',
-              color: '#0095FF', padding: '6px 16px', borderRadius: 20, fontSize: 13, fontWeight: 600 }}>
+            <span style={{ background: 'rgba(0,149,255,0.15)',
+              border: '1px solid rgba(0,149,255,0.3)', color: '#0095FF',
+              padding: '6px 16px', borderRadius: 20, fontSize: 13, fontWeight: 600 }}>
               Подписаться
             </span>
           </a>
@@ -253,24 +310,28 @@ export default function JoinPage() {
     </div>
   );
 
-  // ── DONE ────────────────────────────────────────────────────────────────────
+  // ── DONE ──────────────────────────────────────────────────────────────────
   if (screen === 'done') return (
-    <div style={{ minHeight: '100vh', background: '#0B0B0B', display: 'flex', flexDirection: 'column',
-      alignItems: 'center', justifyContent: 'center', padding: '0 24px', textAlign: 'center' }}>
+    <div style={{ minHeight: '100vh', background: '#0B0B0B', display: 'flex',
+      flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      padding: '0 24px', textAlign: 'center' }}>
       <span style={{ fontSize: 64, marginBottom: 20, opacity: 0.5 }}>🏁</span>
-      <h2 style={{ fontSize: 22, fontWeight: 700, color: '#fff', marginBottom: 8 }}>Розыгрыш завершён</h2>
+      <h2 style={{ fontSize: 22, fontWeight: 700, color: '#fff', marginBottom: 8 }}>
+        Розыгрыш завершён
+      </h2>
       <p style={{ fontSize: 14, color: '#7D7D7D', lineHeight: 1.6, marginBottom: 32 }}>
         Итоги подведены, либо розыгрыш отменён.
       </p>
       <button onClick={() => router.replace('/')}
         style={{ padding: '14px 32px', borderRadius: 22, background: '#2E2F33',
-          border: '1px solid rgba(255,255,255,0.08)', color: '#fff', fontSize: 15, cursor: 'pointer' }}>
+          border: '1px solid rgba(255,255,255,0.08)', color: '#fff',
+          fontSize: 15, cursor: 'pointer' }}>
         На главную
       </button>
     </div>
   );
 
-  // ── JOINED ──────────────────────────────────────────────────────────────────
+  // ── JOINED ────────────────────────────────────────────────────────────────
   if (screen === 'joined' && part && gw) {
     const mult    = calcMultiplier(part);
     const hasExt  = gw.use_boosts || gw.use_invites;
@@ -278,14 +339,14 @@ export default function JoinPage() {
     const invMax   = gw.max_invites ?? 10;
 
     return (
-      <div style={{ minHeight: '100vh', background: '#0B0B0B', display: 'flex', flexDirection: 'column',
-        alignItems: 'center', overflowX: 'hidden' }}>
+      <div style={{ minHeight: '100vh', background: '#0B0B0B', display: 'flex',
+        flexDirection: 'column', alignItems: 'center', overflowX: 'hidden' }}>
         <style>{`
-          @keyframes gradientShift{0%,100%{background-position:0% 50%}50%{background-position:100% 50%}}
-          .gw-gradient-text{
+          .gw-gradient-text {
             background: linear-gradient(90deg,#0095FF 0%,#FF09D2 100%);
-            -webkit-background-clip:text; -webkit-text-fill-color:transparent;
-            background-clip:text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
           }
         `}</style>
 
@@ -294,7 +355,7 @@ export default function JoinPage() {
           <p style={{ fontSize: 16, color: 'rgba(255,255,255,0.55)', marginBottom: 6 }}>
             вы участвуете в розыгрыше
           </p>
-          <p style={{ fontSize: 22, fontWeight: 700, color: '#fff', marginBottom: 0, lineHeight: 1.3 }}>
+          <p style={{ fontSize: 22, fontWeight: 700, color: '#fff', lineHeight: 1.3 }}>
             {gw.title}
           </p>
         </div>
@@ -304,12 +365,13 @@ export default function JoinPage() {
           <p style={{ fontSize: 13, color: '#7D7D7D', marginBottom: 4 }}>
             результаты розыгрыша через...
           </p>
-          <p className="gw-gradient-text" style={{ fontSize: 44, fontWeight: 800, letterSpacing: '-1px', lineHeight: 1 }}>
+          <p className="gw-gradient-text"
+            style={{ fontSize: 44, fontWeight: 800, letterSpacing: '-1px', lineHeight: 1 }}>
             {countdown || '—'}
           </p>
         </div>
 
-        {/* Маскот — чуть меньше чем раньше */}
+        {/* Маскот */}
         <div style={{ marginTop: 28, width: 210, height: 210, borderRadius: 32,
           overflow: 'hidden', position: 'relative', flexShrink: 0 }}>
           <img src={mascotSrc} alt="mascot"
@@ -319,14 +381,14 @@ export default function JoinPage() {
             boxShadow: 'inset 0 0 40px rgba(0,0,0,0.3)', pointerEvents: 'none' }} />
         </div>
 
-        {/* Текст под маскотом */}
+        {/* Текст */}
         <div style={{ marginTop: 18, textAlign: 'center', padding: '0 32px' }}>
           <p style={{ fontSize: 20, fontWeight: 600, color: '#fff', lineHeight: 1.35 }}>
             Вы можете увеличить<br />свои шансы на победу
           </p>
         </div>
 
-        {/* Кнопка открыть панель */}
+        {/* Кнопка */}
         {hasExt && (
           <div style={{ width: '100%', padding: '24px 16px 48px' }}>
             <button onClick={() => { haptic?.impactOccurred('medium'); setBoostOpen(true); }}
@@ -338,51 +400,51 @@ export default function JoinPage() {
           </div>
         )}
 
-        {/* ── BOTTOM SHEET ──────────────────────────────────────────────────── */}
+        {/* ── BOTTOM SHEET ─────────────────────────────────────────────── */}
         {boostOpen && (
           <>
-            {/* Backdrop */}
             <div onClick={() => setBoostOpen(false)}
               style={{ position: 'fixed', inset: 0, zIndex: 9998,
                 background: 'rgba(0,0,0,0.70)', backdropFilter: 'blur(8px)',
                 WebkitBackdropFilter: 'blur(8px)' }} />
 
-            <div style={{
-              position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 9999,
+            <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 9999,
               background: '#111113', borderRadius: '28px 28px 0 0',
               border: '1px solid rgba(255,255,255,0.09)', borderBottom: 'none',
-              maxHeight: '90vh', display: 'flex', flexDirection: 'column',
-            }}>
-              {/* Drag handle */}
+              maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
+
+              {/* Handle */}
               <div style={{ display: 'flex', justifyContent: 'center', padding: '10px 0 0' }}>
-                <div style={{ width: 36, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.15)' }} />
+                <div style={{ width: 36, height: 4, borderRadius: 2,
+                  background: 'rgba(255,255,255,0.15)' }} />
               </div>
 
-              {/* Кнопка закрыть */}
+              {/* Close */}
               <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '6px 16px 0' }}>
                 <button onClick={() => setBoostOpen(false)}
                   style={{ width: 28, height: 28, borderRadius: '50%',
-                    background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)',
+                    background: 'rgba(255,255,255,0.08)',
+                    border: '1px solid rgba(255,255,255,0.12)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     cursor: 'pointer', color: 'rgba(255,255,255,0.6)', fontSize: 14 }}>✕</button>
               </div>
 
-              {/* Пилюля-мультипликатор */}
+              {/* Мультипликатор-пилюля */}
               <div style={{ display: 'flex', justifyContent: 'center', padding: '12px 0 0' }}>
-                <div style={{
-                  height: 56, paddingInline: 24, borderRadius: 28, minWidth: 130,
+                <div style={{ height: 56, paddingInline: 28, borderRadius: 28, minWidth: 130,
                   background: 'linear-gradient(90deg,#0095FF 0%,#FF09D2 100%)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
-                }}>
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
                   {mult <= 1 ? (
                     <>
                       <span style={{ fontSize: 36, fontWeight: 800, color: '#fff' }}>0</span>
-                      <img src="/mascots/hz.webp" alt="" style={{ width: 36, height: 36, objectFit: 'contain' }} />
+                      <img src="/mascots/hz.webp" alt=""
+                        style={{ width: 36, height: 36, objectFit: 'contain' }} />
                     </>
                   ) : (
                     <>
                       <span style={{ fontSize: 34, fontWeight: 800, color: '#fff' }}>×{mult}</span>
-                      <img src="/mascots/fire.webp" alt="" style={{ width: 32, height: 32, objectFit: 'contain' }} />
+                      <img src="/mascots/fire.webp" alt=""
+                        style={{ width: 32, height: 32, objectFit: 'contain' }} />
                     </>
                   )}
                 </div>
@@ -393,15 +455,13 @@ export default function JoinPage() {
                 {(['boosts', 'invites'] as BoostTab[]).map(tab => (
                   <button key={tab}
                     onClick={() => { haptic?.selectionChanged(); setActiveTab(tab); }}
-                    style={{
-                      flex: 1, height: 40, borderRadius: 30, cursor: 'pointer',
+                    style={{ flex: 1, height: 40, borderRadius: 30, cursor: 'pointer',
                       fontWeight: 600, fontSize: 14, transition: 'all 0.15s',
                       background: activeTab === tab
                         ? 'linear-gradient(90deg,#0095FF 0%,#FF09D2 100%)'
                         : 'rgba(255,255,255,0.07)',
                       border: activeTab === tab ? 'none' : '1px solid rgba(255,255,255,0.10)',
-                      color: activeTab === tab ? '#fff' : 'rgba(255,255,255,0.55)',
-                    }}>
+                      color: activeTab === tab ? '#fff' : 'rgba(255,255,255,0.55)' }}>
                     {tab === 'boosts' ? '⚡ Бусты' : '👥 Инвайты'}
                   </button>
                 ))}
@@ -410,10 +470,9 @@ export default function JoinPage() {
               {/* Контент */}
               <div style={{ flex: 1, overflowY: 'auto', padding: '20px 16px 40px' }}>
 
-                {/* ── БУСТЫ ── */}
+                {/* Бусты */}
                 {activeTab === 'boosts' && gw.use_boosts && (
                   <div>
-                    {/* Кол-во бустов */}
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 12 }}>
                       <span style={{ fontSize: 32, fontWeight: 800, color: '#fff' }}>
                         {part.boost_count}
@@ -425,23 +484,17 @@ export default function JoinPage() {
                         бустов
                       </span>
                     </div>
-
-                    {/* Прогресс-бар */}
-                    <div style={{ height: 6, background: 'rgba(255,255,255,0.08)', borderRadius: 3,
-                      marginBottom: 16, overflow: 'hidden' }}>
+                    <div style={{ height: 6, background: 'rgba(255,255,255,0.08)',
+                      borderRadius: 3, marginBottom: 16, overflow: 'hidden' }}>
                       <div style={{ height: '100%', borderRadius: 3, transition: 'width 0.4s',
                         background: 'linear-gradient(90deg,#0095FF,#FF09D2)',
                         width: `${(part.boost_count / boostMax) * 100}%` }} />
                     </div>
-
-                    {/* Описание */}
                     <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.45)', lineHeight: 1.6,
                       marginBottom: 24 }}>
-                      Подари буст каналу — получи дополнительный билет в розыгрыше за каждый буст.
+                      Подари буст каналу — получи дополнительный билет за каждый буст.
                       До 10× больше шансов победить!
                     </p>
-
-                    {/* Кнопка буст */}
                     <a href={gw.boost_url || '#'} target="_blank" rel="noopener noreferrer"
                       onClick={() => haptic?.impactOccurred('medium')}
                       className="animated-border-btn"
@@ -450,12 +503,9 @@ export default function JoinPage() {
                         fontSize: 17, textDecoration: 'none', marginBottom: 12 }}>
                       ⚡ Буст канала
                     </a>
-
-                    {/* Проверить */}
                     <button onClick={checkBoost} disabled={checkingBoost}
                       style={{ width: '100%', height: 52, borderRadius: 30,
-                        background: 'transparent',
-                        border: '2px dashed rgba(255,255,255,0.20)',
+                        background: 'transparent', border: '2px dashed rgba(255,255,255,0.20)',
                         color: checkingBoost ? '#7D7D7D' : 'rgba(255,255,255,0.7)',
                         fontSize: 15, fontWeight: 600,
                         cursor: checkingBoost ? 'not-allowed' : 'pointer',
@@ -465,10 +515,9 @@ export default function JoinPage() {
                   </div>
                 )}
 
-                {/* ── ИНВАЙТЫ ── */}
+                {/* Инвайты */}
                 {activeTab === 'invites' && gw.use_invites && (
                   <div>
-                    {/* Кол-во */}
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 12 }}>
                       <span style={{ fontSize: 32, fontWeight: 800, color: '#fff' }}>
                         {part.invite_count}
@@ -480,31 +529,25 @@ export default function JoinPage() {
                         приглашений
                       </span>
                     </div>
-
-                    {/* Прогресс-бар */}
-                    <div style={{ height: 6, background: 'rgba(255,255,255,0.08)', borderRadius: 3,
-                      marginBottom: 16, overflow: 'hidden' }}>
+                    <div style={{ height: 6, background: 'rgba(255,255,255,0.08)',
+                      borderRadius: 3, marginBottom: 16, overflow: 'hidden' }}>
                       <div style={{ height: '100%', borderRadius: 3, transition: 'width 0.4s',
                         background: 'linear-gradient(90deg,#0095FF,#FF09D2)',
                         width: `${Math.min((part.invite_count / invMax) * 100, 100)}%` }} />
                     </div>
-
-                    {/* Описание */}
                     <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.45)', lineHeight: 1.6,
                       marginBottom: 24 }}>
                       Пригласи друга — получи дополнительный билет, если он подпишется на канал!
                     </p>
-
-                    {/* Реферальная ссылка */}
                     <button onClick={copyInvite}
-                      style={{ width: '100%', padding: '14px 16px', borderRadius: 18, marginBottom: 16,
-                        background: 'rgba(255,255,255,0.04)',
+                      style={{ width: '100%', padding: '14px 16px', borderRadius: 18,
+                        marginBottom: 16, background: 'rgba(255,255,255,0.04)',
                         border: '1.5px dashed rgba(255,255,255,0.15)',
                         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                         cursor: 'pointer' }}>
-                      <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', fontFamily: 'monospace',
-                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                        maxWidth: '78%' }}>
+                      <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)',
+                        fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap', maxWidth: '78%' }}>
                         t.me/{BOT}/{APP}?startapp=gw_{id}_ref_{part.referral_code}
                       </span>
                       <span style={{ fontSize: 11, color: '#0095FF', fontWeight: 700,
@@ -512,8 +555,6 @@ export default function JoinPage() {
                         Копировать
                       </span>
                     </button>
-
-                    {/* Кнопки */}
                     <div style={{ display: 'flex', gap: 10 }}>
                       <button onClick={copyInvite}
                         style={{ flex: 1, height: 52, borderRadius: 30, background: '#2990FF',
@@ -530,7 +571,6 @@ export default function JoinPage() {
                     </div>
                   </div>
                 )}
-
               </div>
             </div>
           </>
