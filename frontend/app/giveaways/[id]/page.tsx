@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { useTelegram } from '@/app/providers/TelegramProvider';
-import PageHeader from '@/components/PageHeader'; // <-- Твоя шапка
+import PageHeader from '@/components/PageHeader';
 import { AnalyticsCards } from '@/components/giveaways/AnalyticsCards';
 import { AnalyticsChart } from '@/components/giveaways/AnalyticsChart';
 
@@ -12,10 +12,11 @@ export default function CreatorGiveawayPage() {
   const params = useParams();
   const giveawayId = params?.id;
   const { initData, haptic } = useTelegram();
+  
+  const [isLoading, setIsLoading] = useState(true);
   const [status, setStatus] = useState<string>('loading');
   const [winners, setWinners] = useState<any[]>([]);
   const [analytics, setAnalytics] = useState<any>(null);
-  const [isDrawing, setIsDrawing] = useState(false);
 
   const fetchData = async () => {
     if (!initData || !giveawayId) return;
@@ -24,12 +25,20 @@ export default function CreatorGiveawayPage() {
         fetch(`${API}/giveaways/${giveawayId}/status`, { headers: { Authorization: `Bearer ${initData}` } }),
         fetch(`${API}/giveaways/${giveawayId}/analytics`, { headers: { Authorization: `Bearer ${initData}` } })
       ]);
+      
+      if (!statRes.ok || !anRes.ok) throw new Error("Ошибка загрузки данных");
+
       const statData = await statRes.json();
       const anData = await anRes.json();
+      
       setStatus(statData.status);
       if (statData.status === 'completed') setWinners(statData.winners ||[]);
       setAnalytics(anData);
-    } catch (e) { console.error(e); }
+    } catch (e) { 
+      console.error(e); 
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -37,7 +46,7 @@ export default function CreatorGiveawayPage() {
     let interval: NodeJS.Timeout;
     if (status === 'finalizing') interval = setInterval(fetchData, 3000);
     return () => clearInterval(interval);
-  },[initData, giveawayId, status]);
+  }, [initData, giveawayId, status]);
 
   const handleExportCSV = async () => {
     haptic?.impactOccurred('medium');
@@ -72,7 +81,17 @@ export default function CreatorGiveawayPage() {
       
       <main className="flex-1 p-4 pb-24 animate-in fade-in duration-300">
         
-        {analytics && (
+        {isLoading ? (
+          <div className="flex flex-col items-center justify-center mt-20">
+            <div className="w-8 h-8 border-2 border-[#0095FF] border-t-transparent rounded-full animate-spin"></div>
+            <p className="text-gray-400 mt-4 text-sm">Загрузка аналитики...</p>
+          </div>
+        ) : !analytics ? (
+          <div className="flex flex-col items-center justify-center mt-20 text-center">
+            <span className="text-5xl mb-4">⚠️</span>
+            <p className="text-gray-400 text-sm">Не удалось загрузить статистику.<br/>Попробуйте перезайти в приложение.</p>
+          </div>
+        ) : (
           <>
             <AnalyticsCards analytics={analytics} />
             <AnalyticsChart data={analytics.chart_data} />
@@ -86,7 +105,7 @@ export default function CreatorGiveawayPage() {
           </>
         )}
 
-        {status === 'active' && (
+        {status === 'active' && !isLoading && (
           <button onClick={handleFinalize} className="w-full h-14 rounded-2xl font-bold text-[16px] bg-red-500/10 text-red-500 border border-red-500/20 active:scale-95 transition-transform">
             Подвести итоги досрочно
           </button>
@@ -99,7 +118,7 @@ export default function CreatorGiveawayPage() {
           </div>
         )}
 
-        {status === 'completed' && (
+        {status === 'completed' && !isLoading && (
           <div className="mt-4 bg-[#2E2F33] p-5 rounded-2xl border border-white/5">
             <div className="flex justify-between items-end mb-4">
               <h3 className="font-bold text-white text-lg">🏆 Победители</h3>

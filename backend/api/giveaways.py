@@ -97,19 +97,20 @@ async def get_giveaway_analytics(
             daily_data[day_str] = {"date": day_str, "participants": 0, "joins": 0, "leaves": 0}
         daily_data[day_str]["participants"] += row.count
 
-    # 2. Подписки/отписки по спонсорским каналам с момента старта розыгрыша
-    start_filter = g.start_date if g.start_date else g.created_at # Если нет start_date
-    if start_filter and g.sponsor_channel_ids:
+    # 2. Подписки/отписки по спонсорским каналам
+    if g.sponsor_channel_ids:
+        where_clauses = [ChannelEvent.channel_id.in_(g.sponsor_channel_ids)]
+        # Если есть start_date, отсекаем старые события, иначе берем всё
+        if g.start_date:
+            where_clauses.append(ChannelEvent.created_at >= g.start_date)
+            
         events_daily = await db.execute(
             select(
                 func.date(ChannelEvent.created_at).label("day"),
                 ChannelEvent.action,
                 func.count().label("count")
             )
-            .where(
-                ChannelEvent.channel_id.in_(g.sponsor_channel_ids),
-                ChannelEvent.created_at >= start_filter
-            )
+            .where(*where_clauses)
             .group_by("day", ChannelEvent.action)
         )
         for row in events_daily.fetchall():
