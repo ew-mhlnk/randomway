@@ -21,6 +21,7 @@ from api import api_router
 from handlers import channels as channel_handlers
 from handlers import posts as post_handlers
 from handlers import callbacks as callback_handlers
+from handlers import members as member_handlers  # <-- ДОБАВИТЬ СЮДА
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 load_dotenv()
@@ -40,6 +41,7 @@ dp = Dispatcher(storage=storage)
 dp.include_router(channel_handlers.router)
 dp.include_router(post_handlers.router)
 dp.include_router(callback_handlers.router)
+dp.include_router(member_handlers.router)       # <-- ДОБАВИТЬ СЮДА
 
 
 async def handle_check_results(message: Message, giveaway_id: int):

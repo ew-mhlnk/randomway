@@ -2,7 +2,9 @@
 import csv
 import io
 import logging
+from datetime import timedelta
 from fastapi import APIRouter, Depends, Request, BackgroundTasks, HTTPException
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from aiogram.types import BufferedInputFile
@@ -13,7 +15,7 @@ from schemas import GiveawayPublishSchema, DrawAdditionalRequest
 from services.giveaway_service import giveaway_service
 from repositories.giveaway_repo import giveaway_repo
 from repositories.participant_repo import participant_repo
-from models import User
+from models import User, ChannelEvent, Participant
 
 router = APIRouter(tags=["Giveaways"])
 
@@ -71,11 +73,63 @@ async def get_giveaway_analytics(
     g = await giveaway_repo.get_by_id(db, giveaway_id)
     if not g or g.creator_id != user_id:
         raise HTTPException(status_code=404, detail="Не найдено")
+
     stats = await participant_repo.get_analytics_stats(db, giveaway_id)
+    
+    # Считаем виральность (сколько людей пришло по реферальным ссылкам)
+    viral_joins = await db.scalar(
+        select(func.count(Participant.id))
+        .where(Participant.giveaway_id == giveaway_id, Participant.referred_by.isnot(None))
+    )
+
+    # Собираем данные по дням (для графиков)
+    daily_data = {}
+
+    # 1. Участники по дням
+    parts_daily = await db.execute(
+        select(func.date(Participant.joined_at).label("day"), func.count().label("count"))
+        .where(Participant.giveaway_id == giveaway_id)
+        .group_by("day")
+    )
+    for row in parts_daily.fetchall():
+        day_str = row.day.isoformat()
+        if day_str not in daily_data:
+            daily_data[day_str] = {"date": day_str, "participants": 0, "joins": 0, "leaves": 0}
+        daily_data[day_str]["participants"] += row.count
+
+    # 2. Подписки/отписки по спонсорским каналам с момента старта розыгрыша
+    start_filter = g.start_date if g.start_date else g.created_at # Если нет start_date
+    if start_filter and g.sponsor_channel_ids:
+        events_daily = await db.execute(
+            select(
+                func.date(ChannelEvent.created_at).label("day"),
+                ChannelEvent.action,
+                func.count().label("count")
+            )
+            .where(
+                ChannelEvent.channel_id.in_(g.sponsor_channel_ids),
+                ChannelEvent.created_at >= start_filter
+            )
+            .group_by("day", ChannelEvent.action)
+        )
+        for row in events_daily.fetchall():
+            day_str = row.day.isoformat()
+            if day_str not in daily_data:
+                daily_data[day_str] = {"date": day_str, "participants": 0, "joins": 0, "leaves": 0}
+            if row.action == "join":
+                daily_data[day_str]["joins"] += row.count
+            elif row.action == "leave":
+                daily_data[day_str]["leaves"] += row.count
+
+    # Сортируем дни по порядку
+    chart_data = [daily_data[k] for k in sorted(daily_data.keys())]
+
     return {
         "total_participants": stats["total"],
-        "cheaters_caught":    stats["cheaters"],
-        "total_boosts":       stats["boosts"],
+        "cheaters_caught": stats["cheaters"],
+        "total_boosts": stats["boosts"],
+        "viral_joins": viral_joins or 0,
+        "chart_data": chart_data
     }
 
 

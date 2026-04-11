@@ -108,3 +108,14 @@ class Participant(Base):
     is_active:     Mapped[bool]       = mapped_column(Boolean, default=True)
     joined_at:     Mapped[datetime]   = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class ChannelEvent(Base):
+    __tablename__ = "channel_events"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    channel_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger)
+    action: Mapped[str] = mapped_column(String(20)) # "join" или "leave"
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
